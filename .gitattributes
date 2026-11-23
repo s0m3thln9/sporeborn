@@ -1,0 +1,14 @@
+* text=auto
+
+# Project-authored text has the same line endings on all platforms.
+*.cs text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.asmdef text eol=lf
+*.asmref text eol=lf
+*.meta text eol=lf
+*.unity text eol=lf
+*.prefab text eol=lf
+.editorconfig text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf

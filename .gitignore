@@ -1,0 +1,31 @@
+# The project documentation is versioned even when a global ignore lists docs/.
+!/docs/
+!/docs/**
+
+# Unity-generated directories in the project root.
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+/[Bb]uild/
+/[Bb]uilds/
+
+# Generated IDE files and local workspace settings.
+/.vs/
+/.idea/
+/.vscode/
+/*.csproj
+/*.sln
+/*.slnx
+/*.user
+/*.userprefs
+
+# Local configuration and operating system files.
+/.env
+/.env.*
+!/.env.example
+.DS_Store
+Thumbs.db

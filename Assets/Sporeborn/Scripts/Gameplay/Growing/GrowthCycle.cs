@@ -31,6 +31,91 @@ namespace Sporeborn.Gameplay.Growing
         public bool IsWorking(Station station) => Dock == station && Remaining > 0f;
         public bool IsDone(Station station) => _finished[(int)station];
 
+        [Serializable]
+        public sealed class Snapshot
+        {
+            public int[] stock;
+            public int[] mix;
+            public bool[] doors;
+            public bool[] finished;
+            public TrayStage stage;
+            public int dock;
+            public float remaining;
+            public float mixing;
+            public bool lidClosed;
+            public bool jarOpen;
+        }
+
+        public Snapshot Capture() => new Snapshot
+        {
+            stock = (int[])_stock.Clone(),
+            mix = (int[])_mix.Clone(),
+            doors = (bool[])_doors.Clone(),
+            finished = (bool[])_finished.Clone(),
+            stage = Stage,
+            dock = Dock.HasValue ? (int)Dock.Value : -1,
+            remaining = Remaining,
+            mixing = Mixing,
+            lidClosed = LidClosed,
+            jarOpen = JarOpen
+        };
+
+        public bool TryRestore(Snapshot state)
+        {
+            if (state == null || state.stock?.Length != _stock.Length || state.mix?.Length != _mix.Length ||
+                state.doors?.Length != _doors.Length || state.finished?.Length != _finished.Length ||
+                !Enum.IsDefined(typeof(TrayStage), state.stage) || state.dock < -1 || state.dock >= _doors.Length ||
+                !(state.remaining >= 0f && state.remaining <= 120f) ||
+                !(state.mixing >= 0f && state.mixing <= MixingSeconds))
+            {
+                return false;
+            }
+
+            for (int index = 0; index < state.stock.Length; index++)
+            {
+                int limit = index == (int)Portion.Culture ? 3 : Recipe[index] * 3;
+                if (state.stock[index] < 0 || state.stock[index] > limit ||
+                    (index < Recipe.Length && (state.mix[index] < 0 || state.mix[index] > Recipe[index] ||
+                    state.stock[index] + state.mix[index] > limit)))
+                {
+                    return false;
+                }
+            }
+
+            if (state.dock < 0)
+            {
+                if (state.remaining > 0f || state.stage == TrayStage.Fruiting)
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                int dock = state.dock;
+                TrayStage expected = dock == 0 ? TrayStage.Mixed : dock == 1 ? TrayStage.Inoculated
+                    : state.remaining > 0f ? TrayStage.Fruiting : TrayStage.Colonized;
+                TrayStage completed = dock == 0 ? TrayStage.Treated : dock == 1 ? TrayStage.Colonized : TrayStage.Harvest;
+                float duration = dock == 0 ? 10f : dock == 1 ? 60f : 120f;
+                if (state.stage != (state.finished[dock] ? completed : expected) || state.lidClosed != (dock != 2) ||
+                    (state.remaining > 0f && (state.doors[dock] || state.finished[dock] || state.remaining > duration)))
+                {
+                    return false;
+                }
+            }
+
+            Array.Copy(state.stock, _stock, _stock.Length);
+            Array.Copy(state.mix, _mix, _mix.Length);
+            Array.Copy(state.doors, _doors, _doors.Length);
+            Array.Copy(state.finished, _finished, _finished.Length);
+            Stage = state.stage;
+            Dock = state.dock < 0 ? null : (Station)state.dock;
+            Remaining = state.remaining;
+            Mixing = state.mixing;
+            LidClosed = state.lidClosed;
+            JarOpen = state.jarOpen;
+            return true;
+        }
+
         public bool TryAdd(Portion portion)
         {
             int index = (int)portion;

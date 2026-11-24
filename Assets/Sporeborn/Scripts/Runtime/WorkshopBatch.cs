@@ -2,7 +2,7 @@ using UnityEngine;
 
 namespace Sporeborn.Runtime
 {
-    public sealed class WorkshopBatch : MonoBehaviour
+    public sealed partial class WorkshopBatch : MonoBehaviour
     {
         private static readonly int ColorProperty = Shader.PropertyToID("_Color");
 
@@ -14,7 +14,9 @@ namespace Sporeborn.Runtime
         private Material _material;
         private Carryable _printedLabel;
         private Vector3 _printerOutput;
+        private int _nextLabel = 1;
 
+        public WorkshopSession Session { get; private set; }
         public WorkshopGrowth Growth { get; private set; }
         public Collider Printer { get; private set; }
         public Collider Dispatch { get; private set; }
@@ -40,11 +42,16 @@ namespace Sporeborn.Runtime
             Growth = new WorkshopGrowth(transform, _mushroomTemplate, _material, _roomBounds, harvestPosition);
             BuildKnife(harvestPosition);
             BuildPackingStation();
+            Session = gameObject.AddComponent<WorkshopSession>();
+            Session.Initialize(this);
         }
 
         private void Update()
         {
-            Growth?.Tick(Time.deltaTime);
+            if (Session != null && Session.IsPlaying)
+            {
+                Growth.Tick(Time.deltaTime);
+            }
         }
 
         private void BuildKnife(Vector3 platform)
@@ -69,7 +76,7 @@ namespace Sporeborn.Runtime
             for (int index = 0; index < _boxes.Length; index++)
             {
                 _boxes[index].name = $"Shipping box {index + 1}";
-                _boxes[index].Configure(_roomBounds);
+                _boxes[index].Configure(_roomBounds, $"box/{index + 1}");
             }
 
             GameObject printer = CreateBlock("Label printer", transform, new Vector3(0.12f, 0.96f, 1.0f),
@@ -112,12 +119,18 @@ namespace Sporeborn.Runtime
                 return;
             }
 
+            _printedLabel = MakeLabel($"label/{_nextLabel++}");
+        }
+
+        private Carryable MakeLabel(string id)
+        {
             var label = new GameObject("Printed label");
             label.transform.position = _printerOutput;
             Transform paper = CreateBlock("Paper", label.transform, Vector3.zero,
                 new Vector3(0.085f, 0.006f, 0.055f), _material, new Color(0.98f, 0.96f, 0.86f)).transform;
-            _printedLabel = label.AddComponent<Carryable>();
-            _printedLabel.Configure(Carryable.ItemKind.Label, 0.045f, _roomBounds, _printerOutput, paper.GetComponent<Renderer>());
+            var item = label.AddComponent<Carryable>();
+            item.Configure(Carryable.ItemKind.Label, 0.045f, _roomBounds, _printerOutput, paper.GetComponent<Renderer>(), id);
+            return item;
         }
 
         public bool TryDispatchBox(ShippingBox box, out string notice)

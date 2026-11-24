@@ -8,6 +8,12 @@ namespace Sporeborn.Gameplay.Growing
 
     public sealed class GrowthCycle
     {
+        private const float TreatmentSeconds = 10f;
+        private const float IncubationSeconds = 30f;
+        private const float FruitingSeconds = 45f;
+        private const float LegacyIncubationSeconds = 60f;
+        private const float LegacyFruitingSeconds = 120f;
+
         private static readonly int[] Recipe = { 4, 1, 1, 2 };
         private readonly int[] _stock = { 12, 3, 3, 6, 3 };
         private readonly int[] _mix = new int[Recipe.Length];
@@ -65,7 +71,7 @@ namespace Sporeborn.Gameplay.Growing
             if (state == null || state.stock?.Length != _stock.Length || state.mix?.Length != _mix.Length ||
                 state.doors?.Length != _doors.Length || state.finished?.Length != _finished.Length ||
                 !Enum.IsDefined(typeof(TrayStage), state.stage) || state.dock < -1 || state.dock >= _doors.Length ||
-                !(state.remaining >= 0f && state.remaining <= 120f) ||
+                !(state.remaining >= 0f && state.remaining <= LegacyFruitingSeconds) ||
                 !(state.mixing >= 0f && state.mixing <= MixingSeconds))
             {
                 return false;
@@ -95,9 +101,14 @@ namespace Sporeborn.Gameplay.Growing
                 TrayStage expected = dock == 0 ? TrayStage.Mixed : dock == 1 ? TrayStage.Inoculated
                     : state.remaining > 0f ? TrayStage.Fruiting : TrayStage.Colonized;
                 TrayStage completed = dock == 0 ? TrayStage.Treated : dock == 1 ? TrayStage.Colonized : TrayStage.Harvest;
-                float duration = dock == 0 ? 10f : dock == 1 ? 60f : 120f;
+                float maxSavedDuration = (Station)dock switch
+                {
+                    Station.Treatment => TreatmentSeconds,
+                    Station.Incubation => LegacyIncubationSeconds,
+                    _ => LegacyFruitingSeconds
+                };
                 if (state.stage != (state.finished[dock] ? completed : expected) || state.lidClosed != (dock != 2) ||
-                    (state.remaining > 0f && (state.doors[dock] || state.finished[dock] || state.remaining > duration)))
+                    (state.remaining > 0f && (state.doors[dock] || state.finished[dock] || state.remaining > maxSavedDuration)))
                 {
                     return false;
                 }
@@ -235,9 +246,9 @@ namespace Sporeborn.Gameplay.Growing
 
             Remaining = station switch
             {
-                Station.Treatment => 10f,
-                Station.Incubation => 60f,
-                _ => 120f
+                Station.Treatment => TreatmentSeconds,
+                Station.Incubation => IncubationSeconds,
+                _ => FruitingSeconds
             };
             if (station == Station.Fruiting)
             {

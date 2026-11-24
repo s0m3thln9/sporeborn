@@ -361,6 +361,12 @@ namespace Sporeborn.Runtime
             if (isPlaying)
             {
                 GUI.DrawTexture(new Rect(centerX - 2f, centerY - 2f, 4f, 4f), Texture2D.whiteTexture);
+                if (_batch.Growth.IsIncubating)
+                {
+                    DrawLabel(new Rect(hintLeft, height - 62f, hintWidth, 34f),
+                        "Пока идёт инкубация, поднесите коробку и напечатайте этикетку");
+                }
+
                 DrawLabel(new Rect(width - 172f, 18f, 154f, 34f), $"Деньги: {_batch.Money}");
                 DrawLabel(new Rect(hintLeft, centerY + 59f, hintWidth, 32f), _detail);
                 float nextRow = centerY + 95f;

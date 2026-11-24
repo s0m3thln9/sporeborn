@@ -6,10 +6,12 @@ namespace Sporeborn.Gameplay.Packaging
         public const int Rows = 4;
         public const int FlapCount = 4;
         private const int PricePerMushroom = 10;
+        private const int GramsPerMushroom = 25;
 
         public int Count { get; private set; }
         public int ClosedFlaps { get; private set; }
         public int Price => Count * PricePerMushroom;
+        public int WeightGrams => Count * GramsPerMushroom;
         public bool IsClosed => ClosedFlaps == FlapCount;
         public bool HasLabel { get; private set; }
         public bool IsShipped { get; private set; }

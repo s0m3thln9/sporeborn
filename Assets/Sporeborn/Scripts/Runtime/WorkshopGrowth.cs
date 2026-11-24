@@ -20,6 +20,8 @@ namespace Sporeborn.Runtime
         private readonly Dictionary<Collider, Station> _slots = new Dictionary<Collider, Station>();
         private readonly Dictionary<Collider, Station> _starts = new Dictionary<Collider, Station>();
         private readonly Transform[] _doorPanels = new Transform[3];
+        private readonly TextMesh[] _deviceDisplays = new TextMesh[3];
+        private readonly WorkshopSounds _sounds;
         private readonly Transform[] _docks = new Transform[3];
         private readonly Carryable[] _crop = new Carryable[MushroomCount];
         private readonly Carryable _template;
@@ -38,15 +40,18 @@ namespace Sporeborn.Runtime
         private bool _cropCovered;
         private int _cropNumber = 1;
 
-        public WorkshopGrowth(Transform room, Carryable template, Material material, BoxCollider bounds, Vector3 platform)
+        public WorkshopGrowth(Transform room, Carryable template, Material material, BoxCollider bounds, Vector3 platform, WorkshopSounds sounds)
         {
             _room = room;
             _template = template;
             _material = material;
             _bounds = bounds;
+            _sounds = sounds;
 
             Block("Preparation bench", room, new Vector3(-1.97f, 0.44f, -0.27f),
                 new Vector3(0.9f, 0.88f, 1.79f), new Color(0.38f, 0.30f, 0.24f));
+            WorkshopBatch.AddFrontText(room, new Vector3(-1.51f, 0.71f, -0.27f), "ПОДГОТОВКА", 0.038f, Color.white)
+                .transform.rotation = Quaternion.Euler(0f, -90f, 0f);
             for (int index = 0; index < Portions.Length; index++)
             {
                 float z = -1f + index * 0.35f;
@@ -54,7 +59,7 @@ namespace Sporeborn.Runtime
                     new Vector3(0.26f, 0.16f, 0.24f),
                     index == 3 ? new Color(0.36f, 0.63f, 0.79f) : new Color(0.62f, 0.52f, 0.36f));
                 _sources.Add(source.GetComponent<Collider>(), (Portion)index);
-                Sign(new Vector3(-2.19f, 1.04f, z), Portions[index], 0.0031f);
+                Sign(new Vector3(-2.19f, 1.04f, z), Portions[index], 0.023f);
             }
 
             _jarLid = Block("Culture jar lid", room, new Vector3(-2.19f, 1.048f, 0.4f),
@@ -95,7 +100,10 @@ namespace Sporeborn.Runtime
             if (before != _cycle.Stage)
             {
                 RefreshTray();
+                _sounds.Play(WorkshopSounds.Cue.Finished);
             }
+
+            UpdateDeviceDisplays();
 
             RefreshCropAccess();
         }
@@ -117,6 +125,9 @@ namespace Sporeborn.Runtime
                 }
             }
         }
+
+        public string FirstStep => _cycle.Stage == TrayStage.Empty && !_cycle.HasMix && _cropNumber == 1
+            ? "Начните со стола подготовки слева" : null;
 
         public bool TryCut(Carryable mushroom)
         {
@@ -219,6 +230,7 @@ namespace Sporeborn.Runtime
                 if (click)
                 {
                     _cultureLoaded = true;
+                    _sounds.Play(WorkshopSounds.Cue.Portion);
                 }
 
                 return "ЛКМ   Набрать порцию мицелия";
@@ -260,6 +272,8 @@ namespace Sporeborn.Runtime
                 {
                     _scoop = portion;
                 }
+
+                _sounds.Play(WorkshopSounds.Cue.Portion);
             }
 
             return "ЛКМ   Набрать порцию";
@@ -274,10 +288,12 @@ namespace Sporeborn.Runtime
 
             if (held.Kind == Kind.Mixer)
             {
+                bool wasReady = _cycle.MixReady;
                 _cycle.Mix(mixingSeconds);
-                if (mixingSeconds > 0f && _cycle.MixReady)
+                if (!wasReady && _cycle.MixReady)
                 {
                     RefreshMix();
+                    _sounds.Play(WorkshopSounds.Cue.Finished);
                 }
 
                 return _cycle.MixReady ? "Смесь готова" : !_cycle.HasMix ? "Сначала добавьте компоненты"
@@ -305,6 +321,7 @@ namespace Sporeborn.Runtime
             {
                 EmptyTool(held);
                 RefreshMix();
+                _sounds.Play(WorkshopSounds.Cue.Portion);
             }
 
             return "ЛКМ   Добавить порцию";
@@ -362,6 +379,7 @@ namespace Sporeborn.Runtime
                     {
                         RefreshMix();
                         RefreshTray();
+                        _sounds.Play(WorkshopSounds.Cue.Portion);
                     }
 
                     return "ЛКМ   Переложить смесь";
@@ -376,6 +394,7 @@ namespace Sporeborn.Runtime
                     {
                         _cultureLoaded = false;
                         RefreshTray();
+                        _sounds.Play(WorkshopSounds.Cue.Portion);
                     }
 
                     return "ЛКМ   Внести мицелий";
@@ -406,6 +425,7 @@ namespace Sporeborn.Runtime
                 if (click && _cycle.TryStart(station))
                 {
                     RefreshTray();
+                    _sounds.Play(WorkshopSounds.Cue.Start);
                 }
 
                 return "ЛКМ   Старт";
@@ -516,11 +536,21 @@ namespace Sporeborn.Runtime
             return _cycle.LidClosed ? $"{state} · Крышка закрыта" : state;
         }
 
-        private string DeviceStatus(Station station)
+        private string DeviceStatus(Station station) => $"{Stations[(int)station]} · {DeviceReading(station)}";
+
+        private string DeviceReading(Station station) => _cycle.IsWorking(station) ? $"{Mathf.CeilToInt(_cycle.Remaining)} с"
+            : _cycle.Dock != station ? "Пусто" : _cycle.IsDone(station) ? "Готово" : "Лоток загружен";
+
+        private void UpdateDeviceDisplays()
         {
-            string status = _cycle.IsWorking(station) ? $"{Mathf.CeilToInt(_cycle.Remaining)} с"
-                : _cycle.IsDone(station) ? "Готово" : _cycle.Dock == station ? "Лоток загружен" : "Пусто";
-            return $"{Stations[(int)station]} · {status}";
+            for (int index = 0; index < _deviceDisplays.Length; index++)
+            {
+                string status = DeviceReading((Station)index);
+                if (_deviceDisplays[index].text != status)
+                {
+                    _deviceDisplays[index].text = status;
+                }
+            }
         }
 
         private void RefreshMix()
@@ -574,6 +604,7 @@ namespace Sporeborn.Runtime
 
             RefreshMix();
             RefreshTray(false);
+            UpdateDeviceDisplays();
         }
 
         internal string DockId => _cycle.Dock.HasValue ? $"dock/{(int)_cycle.Dock.Value}" : null;
@@ -648,7 +679,12 @@ namespace Sporeborn.Runtime
             _doorPanels[index] = doorRoot.transform;
             _starts.Add(Block("Start button", root, new Vector3(0.48f, 0.97f, -0.29f),
                 new Vector3(0.11f, 0.13f, 0.12f), new Color(0.52f, 0.72f, 0.31f)).GetComponent<Collider>(), station);
-            Sign(position + new Vector3(0f, 1.275f, 0.05f), Stations[index], 0.0042f);
+            var badge = Block("Status panel", root, new Vector3(0f, 1.32f, -0.365f),
+                new Vector3(0.78f, 0.12f, 0.02f), new Color(0.14f, 0.23f, 0.28f));
+            badge.GetComponent<Collider>().enabled = false;
+            WorkshopBatch.AddFrontText(root, root.TransformPoint(0f, 1.35f, -0.38f), Stations[index], 0.028f, Color.white);
+            _deviceDisplays[index] = WorkshopBatch.AddFrontText(root, root.TransformPoint(0f, 1.30f, -0.38f),
+                "Пусто", 0.022f, new Color(0.66f, 1f, 0.83f));
             var dock = new GameObject("Tray dock");
             dock.transform.SetParent(root, false);
             dock.transform.localPosition = new Vector3(0f, 0.84f, -0.04f);

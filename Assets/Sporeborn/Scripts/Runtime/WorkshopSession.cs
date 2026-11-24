@@ -23,6 +23,10 @@ namespace Sporeborn.Runtime
         private bool _confirmNew;
         private bool _settings;
         private bool _resetting;
+        private GUIStyle _headerStyle;
+        private GUIStyle _labelStyle;
+        private GUIStyle _buttonStyle;
+        private GUIStyle _cardStyle;
 
         public bool IsPlaying { get; private set; }
 
@@ -161,19 +165,42 @@ namespace Sporeborn.Runtime
                 return;
             }
 
+            float scale = WorkshopGui.Scale;
+            Matrix4x4 previous = GUI.matrix;
+            GUI.matrix = previous * Matrix4x4.Scale(new Vector3(scale, scale, 1f));
+            try
+            {
+                DrawMenu(Screen.width / scale, Screen.height / scale);
+            }
+            finally
+            {
+                GUI.matrix = previous;
+            }
+        }
+
+        private void DrawMenu(float screenWidth, float screenHeight)
+        {
+            _headerStyle ??= new GUIStyle(GUI.skin.label) { fontSize = 28, fontStyle = FontStyle.Bold };
+            _labelStyle ??= new GUIStyle(GUI.skin.label) { fontSize = 18, wordWrap = true };
+            _buttonStyle ??= new GUIStyle(GUI.skin.button) { fontSize = 18, fixedHeight = 38f };
+            _cardStyle ??= new GUIStyle(GUI.skin.box) { padding = new RectOffset(18, 18, 16, 16) };
+
             if (IsPlaying)
             {
                 if (!string.IsNullOrEmpty(_error))
                 {
-                    GUI.Box(new Rect(16f, 16f, Mathf.Min(Screen.width - 32f, 550f), 36f), _error);
+                    GUI.Label(new Rect(16f, 16f, Mathf.Min(screenWidth - 32f, 550f), 58f), _error, _labelStyle);
                 }
 
                 return;
             }
 
-            float width = Mathf.Min(420f, Screen.width - 24f);
-            GUILayout.BeginArea(new Rect((Screen.width - width) * 0.5f, Screen.height * 0.18f, width, 330f), GUI.skin.box);
-            GUILayout.Label("Sporeborn");
+            float width = Mathf.Min(440f, screenWidth - 24f);
+            GUI.DrawTexture(new Rect(0f, 0f, screenWidth, screenHeight), Texture2D.whiteTexture,
+                ScaleMode.StretchToFill, true, 0f, new Color(0.03f, 0.07f, 0.09f, 0.54f), 0f, 0f);
+            GUILayout.BeginArea(new Rect((screenWidth - width) * 0.5f, screenHeight * 0.22f, width, 420f));
+            GUILayout.BeginVertical(_cardStyle);
+            GUILayout.Label("Sporeborn", _headerStyle);
             GUILayout.Space(8f);
             if (_settings)
             {
@@ -181,13 +208,13 @@ namespace Sporeborn.Runtime
             }
             else if (_confirmNew)
             {
-                GUILayout.Label("Начать новую демонстрацию? Текущий прогресс будет сброшен.");
-                if (GUILayout.Button("Начать заново"))
+                GUILayout.Label("Начать новую демонстрацию? Текущий прогресс будет сброшен.", _labelStyle);
+                if (GUILayout.Button("Начать заново", _buttonStyle))
                 {
                     ConfirmNew();
                 }
 
-                if (GUILayout.Button("Отмена"))
+                if (GUILayout.Button("Отмена", _buttonStyle))
                 {
                     _confirmNew = false;
                 }
@@ -195,23 +222,23 @@ namespace Sporeborn.Runtime
             else
             {
                 GUI.enabled = _started || File.Exists(_path);
-                if (GUILayout.Button("Продолжить"))
+                if (GUILayout.Button("Продолжить", _buttonStyle))
                 {
                     Continue();
                 }
 
                 GUI.enabled = true;
-                if (GUILayout.Button("Новая демонстрация"))
+                if (GUILayout.Button("Новая демонстрация", _buttonStyle))
                 {
                     _confirmNew = true;
                 }
 
-                if (GUILayout.Button("Настройки"))
+                if (GUILayout.Button("Настройки", _buttonStyle))
                 {
                     _settings = true;
                 }
 
-                if (GUILayout.Button("Выйти"))
+                if (GUILayout.Button("Выйти", _buttonStyle))
                 {
 #if UNITY_EDITOR
                     UnityEditor.EditorApplication.isPlaying = false;
@@ -224,17 +251,18 @@ namespace Sporeborn.Runtime
             if (!string.IsNullOrEmpty(_error))
             {
                 GUILayout.Space(8f);
-                GUILayout.Label(_error);
+                GUILayout.Label(_error, _labelStyle);
             }
 
+            GUILayout.EndVertical();
             GUILayout.EndArea();
         }
 
         private void DrawSettings()
         {
-            GUILayout.Label($"Чувствительность мыши: {_player.Sensitivity:0.00}");
+            GUILayout.Label($"Чувствительность мыши: {_player.Sensitivity:0.00}", _labelStyle);
             float sensitivity = GUILayout.HorizontalSlider(_player.Sensitivity, 0.25f, 6f);
-            GUILayout.Label($"Общая громкость: {Mathf.RoundToInt(AudioListener.volume * 100f)}%");
+            GUILayout.Label($"Общая громкость: {Mathf.RoundToInt(AudioListener.volume * 100f)}%", _labelStyle);
             float volume = GUILayout.HorizontalSlider(AudioListener.volume, 0f, 1f);
             if (!Mathf.Approximately(sensitivity, _player.Sensitivity) || !Mathf.Approximately(volume, AudioListener.volume))
             {
@@ -245,7 +273,7 @@ namespace Sporeborn.Runtime
                 PlayerPrefs.Save();
             }
 
-            if (GUILayout.Button("Назад"))
+            if (GUILayout.Button("Назад", _buttonStyle))
             {
                 _settings = false;
             }

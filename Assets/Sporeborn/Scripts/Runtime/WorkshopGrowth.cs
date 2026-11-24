@@ -128,6 +128,8 @@ namespace Sporeborn.Runtime
             }
         }
 
+        public bool IsIncubating => _cycle.IsWorking(Station.Incubation);
+
         public string FirstStep => _cycle.Stage == TrayStage.Empty && !_cycle.HasMix && _cropNumber == 1
             ? "Начните со стола подготовки слева" : null;
 

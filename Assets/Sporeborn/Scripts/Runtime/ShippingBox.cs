@@ -1,4 +1,5 @@
 using Sporeborn.Gameplay.Packaging;
+using Sporeborn.Persistence;
 using UnityEngine;
 
 namespace Sporeborn.Runtime
@@ -28,7 +29,7 @@ namespace Sporeborn.Runtime
             _ => "Нет этикетки"
         };
 
-        public void Configure(BoxCollider roomBounds)
+        public void Configure(BoxCollider roomBounds, string id)
         {
             Vector3[] positions =
             {
@@ -48,7 +49,7 @@ namespace Sporeborn.Runtime
 
             Item = gameObject.AddComponent<Carryable>();
             Item.Configure(Carryable.ItemKind.Box, 0.16f, roomBounds, transform.position,
-                transform.GetChild(0).GetComponent<Renderer>());
+                transform.GetChild(0).GetComponent<Renderer>(), id);
         }
 
         public bool CanReceive(Ray aim, float rangeMeters, float obstructionDistance, out float distance)
@@ -116,6 +117,11 @@ namespace Sporeborn.Runtime
                 return;
             }
 
+            Fold(index);
+        }
+
+        private void Fold(int index)
+        {
             Transform flap = _flaps[index].transform;
             Vector3 position = flap.localPosition;
             position.x *= -0.35f;
@@ -132,8 +138,35 @@ namespace Sporeborn.Runtime
             }
 
             label.Store(transform, new Vector3(0f, 0.14f, 0f));
-            WorkshopBatch.AddText(label.transform, $"{_contents.Count} шт.  ·  {_contents.Price}", 0.0021f, Color.black);
+            ShowLabel(label);
             return true;
+        }
+
+        private void ShowLabel(Carryable label)
+        {
+            WorkshopBatch.AddText(label.transform, $"{_contents.Count} шт.  ·  {_contents.Price}", 0.0021f, Color.black);
+        }
+
+        internal BoxSave Capture() => new BoxSave { id = Item.Id, flaps = _contents.ClosedFlaps, confirmed = _closingConfirmed };
+
+        internal void RestoreContents(BoxSave save, int mushrooms, Carryable label)
+        {
+            _closingConfirmed = save.confirmed;
+            for (int index = 0; index < mushrooms; index++)
+            {
+                _contents.TryAdd(out _, out _);
+            }
+
+            for (int index = 0; index < save.flaps; index++)
+            {
+                _contents.TryCloseFlap(index);
+                Fold(index);
+            }
+
+            if (label != null && _contents.TryLabel())
+            {
+                ShowLabel(label);
+            }
         }
 
         public bool TryShip(out int payment)

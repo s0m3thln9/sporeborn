@@ -31,6 +31,15 @@ namespace Sporeborn.Runtime
 
         public float WalkingMultiplier => _held != null && _held.Kind == Carryable.ItemKind.Box ? 0.82f : 1f;
 
+        internal WorkshopSession Session => _batch != null ? _batch.Session : null;
+        internal Transform Hand => _hand;
+
+        internal void RestoreHeld(Carryable item)
+        {
+            _held = item;
+            UpdateHand(_playerCamera.transform.position);
+        }
+
         private void Awake()
         {
             if (_playerCamera == null || _hand == null || _hand.parent == null || _batch == null)
@@ -240,7 +249,7 @@ namespace Sporeborn.Runtime
 
         private void OnGUI()
         {
-            if (Event.current.type != EventType.Repaint)
+            if (Session == null || !Session.IsPlaying || Event.current.type != EventType.Repaint)
             {
                 return;
             }

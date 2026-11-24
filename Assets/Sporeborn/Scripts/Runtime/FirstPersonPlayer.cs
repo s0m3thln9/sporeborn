@@ -1,3 +1,4 @@
+using Sporeborn.Persistence;
 using UnityEngine;
 
 namespace Sporeborn.Runtime
@@ -13,6 +14,29 @@ namespace Sporeborn.Runtime
         private CharacterController _controller;
         private float _pitch;
         private float _verticalSpeed;
+
+        internal float Sensitivity
+        {
+            get => _lookSensitivity;
+            set => _lookSensitivity = value;
+        }
+
+        internal void CapturePose(WorkshopSave save)
+        {
+            save.playerPosition = transform.position;
+            save.yaw = transform.eulerAngles.y;
+            save.pitch = _pitch;
+        }
+
+        internal void RestorePose(WorkshopSave save)
+        {
+            _controller.enabled = false;
+            transform.SetPositionAndRotation(save.playerPosition, Quaternion.Euler(0f, save.yaw, 0f));
+            _controller.enabled = true;
+            _verticalSpeed = 0f;
+            _pitch = save.pitch;
+            _playerCamera.transform.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
+        }
 
         private void Awake()
         {
@@ -33,11 +57,15 @@ namespace Sporeborn.Runtime
 
         private void Update()
         {
+            WorkshopSession session = _interaction.Session;
+            if (session == null || !session.IsPlaying)
+            {
+                return;
+            }
+
             if (Input.GetKeyDown(KeyCode.Escape))
             {
-                Cursor.lockState = CursorLockMode.None;
-                Cursor.visible = true;
-                _interaction.ClearAim();
+                session.Pause();
                 return;
             }
 

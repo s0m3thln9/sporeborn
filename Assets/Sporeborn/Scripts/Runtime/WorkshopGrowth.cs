@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Sporeborn.Gameplay.Growing;
+using Sporeborn.Persistence;
 using UnityEngine;
 using Kind = Sporeborn.Runtime.Carryable.ItemKind;
 
@@ -35,6 +36,7 @@ namespace Sporeborn.Runtime
         private bool _cupFull;
         private bool _cultureLoaded;
         private bool _cropCovered;
+        private int _cropNumber = 1;
 
         public WorkshopGrowth(Transform room, Carryable template, Material material, BoxCollider bounds, Vector3 platform)
         {
@@ -95,6 +97,11 @@ namespace Sporeborn.Runtime
                 RefreshTray();
             }
 
+            RefreshCropAccess();
+        }
+
+        internal void RefreshCropAccess()
+        {
             bool covered = !_tray.IsResting || _cycle.LidClosed || _cycle.Dock.HasValue || _cycle.Stage != TrayStage.Harvest;
             if (_cropCovered == covered)
             {
@@ -487,6 +494,7 @@ namespace Sporeborn.Runtime
             if (click && _cycle.TryDiscardTray())
             {
                 System.Array.Clear(_crop, 0, _crop.Length);
+                _cropNumber++;
                 RefreshTray();
             }
 
@@ -521,29 +529,75 @@ namespace Sporeborn.Runtime
             Tint(_mixture, _cycle.MixReady ? new Color(0.36f, 0.26f, 0.14f) : Soil);
         }
 
-        private void RefreshTray()
+        private void RefreshTray(bool spawnMushrooms = true)
         {
             _substrate.SetActive(_cycle.Stage != TrayStage.Empty);
             Tint(_substrate, _cycle.Stage >= TrayStage.Colonized ? new Color(0.72f, 0.70f, 0.59f)
                 : _cycle.Stage == TrayStage.Inoculated ? new Color(0.49f, 0.40f, 0.27f) : Soil);
-            if (_cycle.Stage == TrayStage.Fruiting || _cycle.Stage == TrayStage.Harvest)
+            if (spawnMushrooms && (_cycle.Stage == TrayStage.Fruiting || _cycle.Stage == TrayStage.Harvest))
             {
                 bool ripe = _cycle.Stage == TrayStage.Harvest;
                 for (int index = 0; index < _crop.Length; index++)
                 {
                     if (_crop[index] == null)
                     {
-                        Carryable mushroom = Object.Instantiate(_template);
-                        mushroom.name = $"Mushroom {index + 1}";
-                        mushroom.gameObject.SetActive(true);
-                        mushroom.Configure(Kind.Mushroom, 0.022f, _bounds, _tray.transform.TransformPoint(MushroomOffset(index)));
-                        _crop[index] = mushroom;
+                        _crop[index] = MakeMushroom($"mushroom/{_cropNumber}/{index + 1}", index);
                     }
 
                     _crop[index].GrowOn(_tray.transform, MushroomOffset(index), ripe);
                     _crop[index].SetCovered(true);
                 }
             }
+        }
+
+        internal void Capture(WorkshopSave save)
+        {
+            save.growth = _cycle.Capture();
+            save.scoop = _scoop.HasValue ? (int)_scoop.Value : -1;
+            save.cupFull = _cupFull;
+            save.cultureLoaded = _cultureLoaded;
+            save.cropNumber = _cropNumber;
+        }
+
+        internal void Restore(WorkshopSave save)
+        {
+            _cycle.TryRestore(save.growth);
+            _scoop = save.scoop < 0 ? null : (Portion)save.scoop;
+            _cupFull = save.cupFull;
+            _cultureLoaded = save.cultureLoaded;
+            _cropNumber = save.cropNumber;
+            _jarLid.localPosition = new Vector3(-2.19f, 1.048f, _cycle.JarOpen ? 0.535f : 0.4f);
+            for (int index = 0; index < _doorPanels.Length; index++)
+            {
+                _doorPanels[index].localPosition = DoorPosition(_cycle.IsOpen((Station)index));
+            }
+
+            RefreshMix();
+            RefreshTray(false);
+        }
+
+        internal string DockId => _cycle.Dock.HasValue ? $"dock/{(int)_cycle.Dock.Value}" : null;
+        internal Transform ResolveDock() => _cycle.Dock.HasValue ? _docks[(int)_cycle.Dock.Value] : null;
+
+        internal Carryable RestoreMushroom(string id, int crop, int slot)
+        {
+            Carryable mushroom = MakeMushroom(id, slot - 1);
+            if (crop == _cropNumber)
+            {
+                _crop[slot - 1] = mushroom;
+            }
+
+            return mushroom;
+        }
+
+        private Carryable MakeMushroom(string id, int index)
+        {
+            Carryable mushroom = Object.Instantiate(_template);
+            mushroom.name = $"Mushroom {index + 1}";
+            mushroom.gameObject.SetActive(true);
+            mushroom.Configure(Kind.Mushroom, 0.022f, _bounds,
+                _tray.transform.TransformPoint(MushroomOffset(index)), id: id);
+            return mushroom;
         }
 
         private static Vector3 MushroomOffset(int index)

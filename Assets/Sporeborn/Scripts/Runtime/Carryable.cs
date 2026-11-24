@@ -1,4 +1,5 @@
 using System.Collections;
+using Sporeborn.Persistence;
 using UnityEngine;
 
 namespace Sporeborn.Runtime
@@ -28,6 +29,8 @@ namespace Sporeborn.Runtime
         public float Radius { get; private set; } = 0.022f;
         public bool CanCut => _state == State.Rooted && !_covered;
         private bool _covered;
+        private Vector3 _cutLanding;
+        public string Id { get; private set; }
         public ItemKind Kind { get; private set; }
         public string ItemName => Kind switch
         {
@@ -79,9 +82,10 @@ namespace Sporeborn.Runtime
         }
 
         public void Configure(ItemKind kind, float radius, BoxCollider roomBounds, Vector3 recoveryPosition,
-            Renderer highlightRenderer = null)
+            Renderer highlightRenderer = null, string id = null)
         {
             Kind = kind;
+            Id = id ?? kind.ToString();
             Radius = radius;
             _roomBounds = roomBounds;
             _highlightRenderer = highlightRenderer != null ? highlightRenderer : _highlightRenderer;
@@ -117,6 +121,7 @@ namespace Sporeborn.Runtime
             }
 
             _state = State.BeingCut;
+            _cutLanding = landingPosition;
             SetColliders(false);
             StartCoroutine(MoveToPlatform(landingPosition));
             return true;
@@ -160,6 +165,87 @@ namespace Sporeborn.Runtime
             _body.rotation = Quaternion.identity;
             _state = State.Available;
             SetColliders(true);
+        }
+
+        internal ItemSave Capture(string parent)
+        {
+            bool cutting = _state == State.BeingCut;
+            ItemLocation location = _state switch
+            {
+                State.Held => ItemLocation.Held,
+                State.Stored => ItemLocation.Stored,
+                State.Rooted => ItemLocation.Rooted,
+                State.Falling => ItemLocation.Falling,
+                _ => ItemLocation.Resting
+            };
+            return new ItemSave
+            {
+                id = Id,
+                parent = parent,
+                location = location,
+                position = IsHeld ? Vector3.zero : cutting ? _cutLanding :
+                    string.IsNullOrEmpty(parent) ? transform.position : transform.localPosition,
+                rotation = IsHeld ? Quaternion.identity :
+                    string.IsNullOrEmpty(parent) ? transform.rotation : transform.localRotation,
+                recoveryPosition = _lastReachablePosition,
+                recoveryRotation = _lastReachableRotation
+            };
+        }
+
+        internal void RestoreSnapshot(ItemSave save, Transform parent, bool pins)
+        {
+            _lastReachablePosition = save.recoveryPosition;
+            _lastReachableRotation = save.recoveryRotation;
+            _body.isKinematic = true;
+            transform.SetParent(parent, false);
+            transform.SetLocalPositionAndRotation(save.position, save.rotation);
+            _state = save.location switch
+            {
+                ItemLocation.Held => State.Held,
+                ItemLocation.Stored => State.Stored,
+                ItemLocation.Rooted => State.Rooted,
+                _ => State.Available
+            };
+            transform.localScale = pins ? Vector3.one * 0.32f : Vector3.one;
+            _covered = pins;
+            SetColliders(!pins && save.location != ItemLocation.Falling &&
+                (_state == State.Available || _state == State.Rooted));
+        }
+
+        internal void SettleRestoredDrop()
+        {
+            SetColliders(true);
+            Physics.SyncTransforms();
+            Bounds room = _roomBounds.bounds;
+            float floor = float.NegativeInfinity;
+            float bottom = transform.position.y;
+            foreach (Collider itemCollider in _colliders)
+            {
+                bottom = Mathf.Min(bottom, itemCollider.bounds.min.y);
+            }
+
+            foreach (RaycastHit hit in Physics.RaycastAll(transform.position, Vector3.down, room.size.y,
+                RoomLayerMask, QueryTriggerInteraction.Ignore))
+            {
+                if (hit.rigidbody != _body && hit.normal.y > 0.55f && room.Contains(hit.point))
+                {
+                    floor = Mathf.Max(floor, hit.point.y);
+                }
+            }
+
+            if (float.IsNegativeInfinity(floor))
+            {
+                Restore();
+                return;
+            }
+
+            transform.position = new Vector3(transform.position.x, floor + transform.position.y - bottom,
+                transform.position.z);
+            Physics.SyncTransforms();
+            if (!HasPickupPosition())
+            {
+                Restore();
+            }
         }
 
         private void FixedUpdate()
@@ -257,6 +343,7 @@ namespace Sporeborn.Runtime
         private void Restore()
         {
             _body.isKinematic = true;
+            transform.SetPositionAndRotation(_lastReachablePosition, _lastReachableRotation);
             _body.position = _lastReachablePosition;
             _body.rotation = _lastReachableRotation;
             _state = State.Available;

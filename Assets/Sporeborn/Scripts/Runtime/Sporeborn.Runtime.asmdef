@@ -1,5 +1,5 @@
 {
   "name": "Sporeborn.Runtime",
   "rootNamespace": "Sporeborn.Runtime",
-  "references": ["Sporeborn.Gameplay"]
+  "references": ["Sporeborn.Gameplay", "Sporeborn.Persistence"]
 }

@@ -22,16 +22,25 @@ namespace Sporeborn.Runtime
         private Quaternion _lastReachableRotation;
 
         public BoxCollider RoomBounds => _roomBounds;
+        public bool IsResting => _state == State.Available;
         public bool IsHeld => _state == State.Held;
-        public bool CanPickUp => isActiveAndEnabled && (_state == State.Available || _state == State.Falling);
+        public bool CanPickUp => isActiveAndEnabled && !_covered && (_state == State.Available || _state == State.Falling);
         public float Radius { get; private set; } = 0.022f;
-        public bool CanCut => _state == State.Rooted;
+        public bool CanCut => _state == State.Rooted && !_covered;
+        private bool _covered;
         public ItemKind Kind { get; private set; }
         public string ItemName => Kind switch
         {
             ItemKind.Knife => "нож",
             ItemKind.Box => "коробку",
             ItemKind.Label => "этикетку",
+            ItemKind.Scoop => "совок",
+            ItemKind.Cup => "кружку",
+            ItemKind.Mixer => "мешалку",
+            ItemKind.Bowl => "ёмкость",
+            ItemKind.Tray => "лоток",
+            ItemKind.Lid => "крышку",
+            ItemKind.Inoculator => "мерку мицелия",
             _ => "гриб"
         };
 
@@ -40,7 +49,14 @@ namespace Sporeborn.Runtime
             Mushroom,
             Knife,
             Box,
-            Label
+            Label,
+            Scoop,
+            Cup,
+            Mixer,
+            Bowl,
+            Tray,
+            Lid,
+            Inoculator
         }
 
         private enum State
@@ -79,9 +95,18 @@ namespace Sporeborn.Runtime
             _lastReachableRotation = Quaternion.identity;
         }
 
-        public void SetRooted()
+        public void GrowOn(Transform tray, Vector3 position, bool ripe)
         {
             _state = State.Rooted;
+            AttachTo(tray, position);
+            transform.localScale = ripe ? Vector3.one : Vector3.one * 0.32f;
+            SetCovered(!ripe);
+        }
+
+        public void SetCovered(bool covered)
+        {
+            _covered = covered;
+            SetColliders(!covered && (_state == State.Rooted || _state == State.Available));
         }
 
         public bool TryCut(Vector3 landingPosition)
@@ -99,23 +124,38 @@ namespace Sporeborn.Runtime
 
         private IEnumerator MoveToPlatform(Vector3 landingPosition)
         {
-            Vector3 start = transform.position;
+            Vector3 start = transform.localPosition;
             const float duration = 0.24f;
             for (float elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime)
             {
                 float progress = elapsed / duration;
-                transform.position = Vector3.Lerp(start, landingPosition, progress)
+                transform.localPosition = Vector3.Lerp(start, landingPosition, progress)
                     + Vector3.up * (0.08f * Mathf.Sin(progress * Mathf.PI));
                 yield return null;
             }
 
-            Place(landingPosition);
+            transform.localPosition = landingPosition;
+            _state = State.Available;
+            SetColliders(!_covered);
+        }
+
+        public bool TakeFromFixture(Transform hand)
+        {
+            if (_state != State.Stored)
+            {
+                return false;
+            }
+
+            _state = State.Held;
+            AttachTo(hand, Vector3.zero);
+            return true;
         }
 
         public void Place(Vector3 position)
         {
             transform.SetParent(null, true);
             _body.isKinematic = true;
+            transform.SetPositionAndRotation(position, Quaternion.identity);
             _body.position = position;
             _body.rotation = Quaternion.identity;
             _state = State.Available;
@@ -195,6 +235,7 @@ namespace Sporeborn.Runtime
         public void Store(Transform box, Vector3 position)
         {
             _state = State.Stored;
+            _body.isKinematic = true;
             SetColliders(false);
             AttachTo(box, position);
         }

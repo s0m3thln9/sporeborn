@@ -54,8 +54,10 @@ namespace Sporeborn.Runtime
                 return;
             }
 
-            transform.Rotate(0f, Input.GetAxisRaw("Mouse X") * _lookSensitivity, 0f);
-            _pitch = Mathf.Clamp(_pitch - Input.GetAxisRaw("Mouse Y") * _lookSensitivity, -85f, 85f);
+            float mouseX = Input.GetAxisRaw("Mouse X");
+            float mouseY = Input.GetAxisRaw("Mouse Y");
+            transform.Rotate(0f, mouseX * _lookSensitivity, 0f);
+            _pitch = Mathf.Clamp(_pitch - mouseY * _lookSensitivity, -85f, 85f);
             _playerCamera.transform.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
 
             Vector2 input = new Vector2(
@@ -67,7 +69,8 @@ namespace Sporeborn.Runtime
             velocity.y = _verticalSpeed;
             _controller.Move(velocity * Time.deltaTime);
 
-            _interaction.UpdateAim(Input.GetKeyDown(KeyCode.E), Input.GetMouseButtonDown(0));
+            float mixingSeconds = mouseX != 0f || mouseY != 0f ? Time.deltaTime : 0f;
+            _interaction.UpdateAim(Input.GetKeyDown(KeyCode.E), Input.GetMouseButtonDown(0), mixingSeconds);
         }
 
         private static int KeyValue(KeyCode key)

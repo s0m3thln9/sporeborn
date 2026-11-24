@@ -7,7 +7,7 @@ namespace Sporeborn.Runtime
     {
         public const float RangeMeters = 1.5f;
         public const float EyeHeightMeters = 1.4f;
-        private const float ToolRangeMeters = 1f;
+        public const float ToolRangeMeters = 1f;
         private const int RoomLayerMask = 1;
 
         [SerializeField] private Camera _playerCamera;
@@ -51,9 +51,9 @@ namespace Sporeborn.Runtime
             _detail = null;
         }
 
-        public void UpdateAim(bool interact, bool use)
+        public void UpdateAim(bool interact, bool use, float mixingSeconds = 0f)
         {
-            if (!isActiveAndEnabled || !_batch.isActiveAndEnabled)
+            if (!isActiveAndEnabled || !_batch.isActiveAndEnabled || _batch.Growth == null)
             {
                 return;
             }
@@ -64,8 +64,20 @@ namespace Sporeborn.Runtime
             ShippingBox targetBox = target != null && target.Kind == Carryable.ItemKind.Box
                 ? target.GetComponent<ShippingBox>() : null;
 
-            _prompt = null;
-            _detail = targetBox != null ? targetBox.Summary : null;
+            Carryable previous = _held;
+            _batch.Growth.Aim(hit, target, _hand, ref _held, use, mixingSeconds, out _prompt, out _detail);
+            _detail ??= targetBox != null ? targetBox.Summary : null;
+            if (_held != previous)
+            {
+                ClearAim();
+                if (_held != null)
+                {
+                    UpdateHand(aim.origin);
+                }
+
+                return;
+            }
+
             if (_held == null)
             {
                 UpdateEmptyHand(hit.collider, target, targetBox, interact, use);
@@ -156,7 +168,12 @@ namespace Sporeborn.Runtime
 
             string pickup = target.Kind == Carryable.ItemKind.Mushroom ? _pickupPrompt : $"E   Поднять {target.ItemName}";
             string flap = box != null ? box.FlapPrompt(collider) : null;
-            _prompt = flap ?? pickup;
+            if (_prompt != null)
+            {
+                _detail = _detail == null ? pickup : $"{_detail}   ·   {pickup}";
+            }
+
+            _prompt ??= flap ?? pickup;
             if (flap != null)
             {
                 _detail = $"{_detail}   ·   {pickup}";
@@ -195,7 +212,7 @@ namespace Sporeborn.Runtime
 
         private void UpdateHand(Vector3 cameraPosition)
         {
-            bool large = _held.Kind == Carryable.ItemKind.Box;
+            bool large = _held.Kind == Carryable.ItemKind.Box || _held.Kind == Carryable.ItemKind.Tray;
             Vector3 localOffset = large ? new Vector3(0.08f, -0.27f, 0.66f) : _handPosition;
             Vector3 offset = _hand.parent.TransformVector(localOffset);
             float distance = offset.magnitude;

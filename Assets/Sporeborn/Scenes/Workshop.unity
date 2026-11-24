@@ -1649,6 +1649,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1112}
   - component: {fileID: 1113}
+  - component: {fileID: 1201}
   m_Layer: 2
   m_Name: First Person Camera
   m_TagString: MainCamera
@@ -1705,6 +1706,14 @@ Camera:
   m_HDR: 1
   m_AllowMSAA: 1
   m_OcclusionCulling: 1
+--- !u!81 &1201
+AudioListener:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1111}
+  m_Enabled: 1
 --- !u!1 &1114
 GameObject:
   m_ObjectHideFlags: 0

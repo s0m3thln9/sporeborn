@@ -15,9 +15,13 @@ namespace Sporeborn.Runtime
         private Carryable _printedLabel;
         private Vector3 _printerOutput;
         private int _nextLabel = 1;
+        private TextMesh _scaleDisplay;
+        private int _displayedWeight = -1;
 
         public WorkshopSession Session { get; private set; }
         public WorkshopGrowth Growth { get; private set; }
+        public WorkshopSounds Sounds { get; private set; }
+        public Collider Scale { get; private set; }
         public Collider Printer { get; private set; }
         public Collider Dispatch { get; private set; }
         public int Money { get; private set; }
@@ -39,7 +43,8 @@ namespace Sporeborn.Runtime
             _material = _boxTemplate.Material;
             Vector3 harvestPosition = _mushroomTemplate.transform.position;
             _mushroomTemplate.gameObject.SetActive(false);
-            Growth = new WorkshopGrowth(transform, _mushroomTemplate, _material, _roomBounds, harvestPosition);
+            Sounds = new WorkshopSounds(gameObject.AddComponent<AudioSource>());
+            Growth = new WorkshopGrowth(transform, _mushroomTemplate, _material, _roomBounds, harvestPosition, Sounds);
             BuildKnife(harvestPosition);
             BuildPackingStation();
             Session = gameObject.AddComponent<WorkshopSession>();
@@ -51,7 +56,13 @@ namespace Sporeborn.Runtime
             if (Session != null && Session.IsPlaying)
             {
                 Growth.Tick(Time.deltaTime);
+                UpdateScale();
             }
+        }
+
+        private void OnDestroy()
+        {
+            Sounds?.Dispose();
         }
 
         private void BuildKnife(Vector3 platform)
@@ -83,11 +94,83 @@ namespace Sporeborn.Runtime
                 new Vector3(0.24f, 0.12f, 0.21f), _material, new Color(0.25f, 0.33f, 0.40f));
             Printer = printer.GetComponent<Collider>();
             _printerOutput = printer.transform.position + new Vector3(0f, 0.063f, -0.048f);
-            AddStationText(transform, printer.transform.position + Vector3.up * 0.061f, "ПЕЧАТЬ");
+            AddFrontText(transform, printer.transform.position + new Vector3(0f, 0.025f, -0.107f), "ПЕЧАТЬ", 0.017f, Color.white);
             GameObject dispatch = CreateBlock("Dispatch zone", transform, new Vector3(1.88f, 0.40f, 0.56f),
                 new Vector3(0.55f, 0.8f, 0.55f), _material, new Color(0.36f, 0.54f, 0.42f));
             Dispatch = dispatch.GetComponent<Collider>();
-            AddStationText(transform, dispatch.transform.position + new Vector3(0f, 0.401f, -0.21f), "ОТПРАВКА");
+            AddFrontText(transform, dispatch.transform.position + new Vector3(0f, 0.31f, -0.277f), "ОТПРАВКА", 0.025f, Color.white);
+            BuildScale();
+        }
+
+        private void BuildScale()
+        {
+            var position = new Vector3(1.88f, 0.4f, 1.46f);
+            CreateBlock("Scale stand", transform, position, new Vector3(0.54f, 0.8f, 0.54f),
+                _material, new Color(0.25f, 0.34f, 0.47f));
+            Scale = CreateBlock("Scale platform", transform, position + Vector3.up * 0.423f,
+                new Vector3(0.51f, 0.046f, 0.49f), _material, new Color(0.62f, 0.72f, 0.78f)).GetComponent<Collider>();
+            AddFrontText(transform, position + new Vector3(0f, 0.33f, -0.272f), "ВЕСЫ", 0.032f, Color.white);
+            _scaleDisplay = AddFrontText(transform, position + new Vector3(0f, 0.25f, -0.272f), "—", 0.024f,
+                new Color(0.66f, 1f, 0.83f));
+        }
+
+        public string ScaleReading
+        {
+            get
+            {
+                ShippingBox box = BoxOnScale();
+                return box == null ? "Весы пусты" : $"{box.WeightGrams} г   ·   Цена: {box.Price}";
+            }
+        }
+
+        public bool TryWeighBox(ShippingBox box, out string notice)
+        {
+            Bounds bounds = Scale.bounds;
+            var position = new Vector3(bounds.center.x, bounds.max.y, bounds.center.z);
+            if (Physics.CheckBox(position + Vector3.up * 0.07f, new Vector3(0.24f, 0.06f, 0.2f),
+                Quaternion.identity, 1, QueryTriggerInteraction.Ignore))
+            {
+                notice = "Весы заняты";
+                return false;
+            }
+
+            box.Item.Place(position);
+            notice = $"{box.WeightGrams} г   ·   Цена: {box.Price}";
+            Sounds.Play(WorkshopSounds.Cue.Pack);
+            return true;
+        }
+
+        private ShippingBox BoxOnScale()
+        {
+            Bounds platform = Scale.bounds;
+            foreach (ShippingBox box in _boxes)
+            {
+                if (box == null || !box.isActiveAndEnabled || !box.Item.IsResting)
+                {
+                    continue;
+                }
+
+                Vector3 position = box.transform.position;
+                if (Mathf.Abs(position.y - platform.max.y) < 0.045f &&
+                    Mathf.Abs(position.x - platform.center.x) < platform.extents.x &&
+                    Mathf.Abs(position.z - platform.center.z) < platform.extents.z &&
+                    Vector3.Dot(box.transform.up, Vector3.up) > 0.85f)
+                {
+                    return box;
+                }
+            }
+
+            return null;
+        }
+
+        private void UpdateScale()
+        {
+            int weight = BoxOnScale()?.WeightGrams ?? -1;
+            if (weight != _displayedWeight)
+            {
+                _displayedWeight = weight;
+                _scaleDisplay.text = weight < 0 ? "—" : ScaleReading;
+            }
         }
 
         public bool TryCut(Carryable mushroom)
@@ -120,6 +203,7 @@ namespace Sporeborn.Runtime
             }
 
             _printedLabel = MakeLabel($"label/{_nextLabel++}");
+            Sounds.Play(WorkshopSounds.Cue.Printer);
         }
 
         private Carryable MakeLabel(string id)
@@ -139,6 +223,7 @@ namespace Sporeborn.Runtime
             if (box.TryShip(out int payment))
             {
                 Money += payment;
+                Sounds.Play(WorkshopSounds.Cue.Sale);
                 notice = $"Продано за {payment}";
                 return true;
             }
@@ -185,7 +270,15 @@ namespace Sporeborn.Runtime
             AddText(sign.transform, text, size, Color.white);
         }
 
-        public static void AddText(Transform parent, string text, float size, Color color)
+        internal static TextMesh AddFrontText(Transform parent, Vector3 position, string text, float size, Color color)
+        {
+            TextMesh mesh = AddText(parent, text, size, color);
+            mesh.transform.position = position;
+            mesh.transform.rotation = Quaternion.identity;
+            return mesh;
+        }
+
+        public static TextMesh AddText(Transform parent, string text, float size, Color color)
         {
             var caption = new GameObject("Caption");
             caption.transform.SetParent(parent, false);
@@ -197,6 +290,7 @@ namespace Sporeborn.Runtime
             mesh.fontSize = 32;
             mesh.characterSize = size;
             mesh.color = color;
+            return mesh;
         }
     }
 }

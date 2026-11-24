@@ -111,6 +111,7 @@ namespace Sporeborn.Runtime
                 if (use && hit.distance <= ToolRangeMeters && _batch.TryCut(target))
                 {
                     _cutUntil = Time.time + 0.24f;
+                    _batch.Sounds.Play(WorkshopSounds.Cue.Cut);
                 }
             }
             else if (_held.Kind == Carryable.ItemKind.Label && targetBox != null)
@@ -118,6 +119,7 @@ namespace Sporeborn.Runtime
                 _prompt = hit.distance <= ToolRangeMeters ? targetBox.LabelPrompt : "Подойдите ближе, чтобы наклеить этикетку";
                 if (use && hit.distance <= ToolRangeMeters && targetBox.TryApplyLabel(_held))
                 {
+                    _batch.Sounds.Play(WorkshopSounds.Cue.Pack);
                     _held = null;
                     ClearAim();
                     return;
@@ -126,18 +128,22 @@ namespace Sporeborn.Runtime
 
             ShippingBox receiving = _held.Kind == Carryable.ItemKind.Mushroom
                 ? _batch.FindReceivingBox(aim, hit) : null;
-            bool dispatch = _held.Kind == Carryable.ItemKind.Box && hit.collider == _batch.Dispatch && hit.normal.y > 0.9f;
+            bool boxOnStand = _held.Kind == Carryable.ItemKind.Box && hit.normal.y > 0.9f;
+            bool dispatch = boxOnStand && hit.collider == _batch.Dispatch;
+            bool weigh = boxOnStand && hit.collider == _batch.Scale;
             _prompt ??= receiving != null ? _placePrompt
-                : dispatch ? _held.GetComponent<ShippingBox>().ShippingPrompt : null;
+                : dispatch ? _held.GetComponent<ShippingBox>().ShippingPrompt
+                : weigh ? "E   Поставить на весы" : null;
 
             if (!interact)
             {
                 return;
             }
 
-            if (dispatch)
+            if (dispatch || weigh)
             {
-                bool released = _batch.TryDispatchBox(_held.GetComponent<ShippingBox>(), out _notice);
+                ShippingBox box = _held.GetComponent<ShippingBox>();
+                bool released = dispatch ? _batch.TryDispatchBox(box, out _notice) : _batch.TryWeighBox(box, out _notice);
                 _noticeUntil = Time.time + 2.5f;
                 if (!released)
                 {
@@ -157,6 +163,7 @@ namespace Sporeborn.Runtime
                     return;
                 }
 
+                _batch.Sounds.Play(WorkshopSounds.Cue.Pack);
                 _noticeUntil = 0f;
             }
 
@@ -180,6 +187,7 @@ namespace Sporeborn.Runtime
 
             if (target == null)
             {
+                _prompt ??= collider == _batch.Scale ? _batch.ScaleReading : _batch.Growth.FirstStep;
                 return;
             }
 
@@ -276,31 +284,49 @@ namespace Sporeborn.Runtime
             _promptStyle ??= new GUIStyle(GUI.skin.label)
             {
                 alignment = TextAnchor.MiddleCenter,
-                fontSize = 17
+                fontSize = 18,
+                normal = { textColor = Color.white }
             };
 
-            float centerX = Screen.width * 0.5f;
-            float centerY = Screen.height * 0.5f;
+            float scale = WorkshopGui.Scale;
+            Matrix4x4 previous = GUI.matrix;
+            GUI.matrix = previous * Matrix4x4.Scale(new Vector3(scale, scale, 1f));
+            try
+            {
+                DrawHud(Screen.width / scale, Screen.height / scale);
+            }
+            finally
+            {
+                GUI.matrix = previous;
+            }
+        }
+
+        private void DrawHud(float width, float height)
+        {
+            float centerX = width * 0.5f;
+            float centerY = height * 0.5f;
+            float hintWidth = Mathf.Min(635f, width - 24f);
+            float hintLeft = centerX - hintWidth * 0.5f;
             bool isPlaying = Cursor.lockState == CursorLockMode.Locked;
             if (isPlaying)
             {
                 GUI.DrawTexture(new Rect(centerX - 2f, centerY - 2f, 4f, 4f), Texture2D.whiteTexture);
-                DrawLabel(new Rect(Screen.width - 172f, 18f, 154f, 32f), $"Деньги: {_batch.Money}");
-                DrawLabel(new Rect(centerX - 245f, centerY + 56f, 490f, 30f), _detail);
-                float nextRow = centerY + 91f;
+                DrawLabel(new Rect(width - 172f, 18f, 154f, 34f), $"Деньги: {_batch.Money}");
+                DrawLabel(new Rect(hintLeft, centerY + 59f, hintWidth, 32f), _detail);
+                float nextRow = centerY + 95f;
                 if (_held != null)
                 {
-                    DrawLabel(new Rect(centerX - 245f, nextRow, 490f, 32f), $"G   Отпустить {_held.ItemName}");
-                    nextRow += 34f;
+                    DrawLabel(new Rect(hintLeft, nextRow, hintWidth, 32f), $"G   Отпустить {_held.ItemName}");
+                    nextRow += 36f;
                 }
 
                 if (Time.time < _noticeUntil)
                 {
-                    DrawLabel(new Rect(centerX - 245f, nextRow, 490f, 32f), _notice);
+                    DrawLabel(new Rect(hintLeft, nextRow, hintWidth, 34f), _notice);
                 }
             }
 
-            DrawLabel(new Rect(centerX - 245f, centerY + 22f, 490f, 34f), isPlaying ? _prompt : _resumePrompt);
+            DrawLabel(new Rect(hintLeft, centerY + 22f, hintWidth, 34f), isPlaying ? _prompt : _resumePrompt);
         }
 
         private void DrawLabel(Rect rect, string text)
@@ -310,7 +336,14 @@ namespace Sporeborn.Runtime
                 return;
             }
 
-            GUI.Box(rect, GUIContent.none);
+            float labelWidth = _promptStyle.CalcSize(new GUIContent(text)).x + 24f;
+            float actualWidth = Mathf.Min(labelWidth, rect.width);
+            rect.x += (rect.width - actualWidth) * 0.5f;
+            rect.width = actualWidth;
+            Color previous = GUI.color;
+            GUI.color = new Color(0.035f, 0.065f, 0.08f, 0.94f);
+            GUI.DrawTexture(rect, Texture2D.whiteTexture);
+            GUI.color = previous;
             GUI.Label(rect, text, _promptStyle);
         }
     }

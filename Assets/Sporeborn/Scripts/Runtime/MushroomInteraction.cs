@@ -15,7 +15,6 @@ namespace Sporeborn.Runtime
         [SerializeField] private WorkshopBatch _batch;
         [SerializeField] private string _pickupPrompt = "E   Поднять гриб";
         [SerializeField] private string _placePrompt = "E   Положить в коробку";
-        [SerializeField] private string _dropPrompt = "E   Отпустить гриб";
         [SerializeField] private string _resumePrompt = "Щелчок   Вернуться к игре";
 
         private Carryable _held;
@@ -60,10 +59,20 @@ namespace Sporeborn.Runtime
             _detail = null;
         }
 
-        public void UpdateAim(bool interact, bool use, float mixingSeconds = 0f)
+        public void UpdateAim(bool interact, bool use, bool drop, float mixingSeconds = 0f)
         {
             if (!isActiveAndEnabled || !_batch.isActiveAndEnabled || _batch.Growth == null)
             {
+                return;
+            }
+
+            if (drop && _held != null)
+            {
+                UpdateHand(_playerCamera.transform.position);
+                _held.Drop(_player);
+                _held = null;
+                _noticeUntil = 0f;
+                ClearAim();
                 return;
             }
 
@@ -116,11 +125,10 @@ namespace Sporeborn.Runtime
             }
 
             ShippingBox receiving = _held.Kind == Carryable.ItemKind.Mushroom
-                ? _batch.FindReceivingBox(aim, hitSomething ? hit.distance : RangeMeters) : null;
+                ? _batch.FindReceivingBox(aim, hit) : null;
             bool dispatch = _held.Kind == Carryable.ItemKind.Box && hit.collider == _batch.Dispatch && hit.normal.y > 0.9f;
             _prompt ??= receiving != null ? _placePrompt
-                : dispatch ? _held.GetComponent<ShippingBox>().ShippingPrompt
-                : _held.Kind == Carryable.ItemKind.Mushroom ? _dropPrompt : $"E   Отпустить {_held.ItemName}";
+                : dispatch ? _held.GetComponent<ShippingBox>().ShippingPrompt : null;
 
             if (!interact)
             {
@@ -136,9 +144,20 @@ namespace Sporeborn.Runtime
                     return;
                 }
             }
-            else if (receiving == null || !receiving.TryReceive(_held))
+            else
             {
-                _held.Drop(_player);
+                if (receiving == null || !receiving.TryReceive(_held))
+                {
+                    if (_held.Kind == Carryable.ItemKind.Mushroom)
+                    {
+                        _notice = "Наведите прицел на открытую коробку со свободным местом";
+                        _noticeUntil = Time.time + 1.5f;
+                    }
+
+                    return;
+                }
+
+                _noticeUntil = 0f;
             }
 
             _held = null;
@@ -268,9 +287,16 @@ namespace Sporeborn.Runtime
                 GUI.DrawTexture(new Rect(centerX - 2f, centerY - 2f, 4f, 4f), Texture2D.whiteTexture);
                 DrawLabel(new Rect(Screen.width - 172f, 18f, 154f, 32f), $"Деньги: {_batch.Money}");
                 DrawLabel(new Rect(centerX - 245f, centerY + 56f, 490f, 30f), _detail);
+                float nextRow = centerY + 91f;
+                if (_held != null)
+                {
+                    DrawLabel(new Rect(centerX - 245f, nextRow, 490f, 32f), $"G   Отпустить {_held.ItemName}");
+                    nextRow += 34f;
+                }
+
                 if (Time.time < _noticeUntil)
                 {
-                    DrawLabel(new Rect(centerX - 245f, centerY + 91f, 490f, 32f), _notice);
+                    DrawLabel(new Rect(centerX - 245f, nextRow, 490f, 32f), _notice);
                 }
             }
 

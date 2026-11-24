@@ -62,12 +62,12 @@ namespace Sporeborn.Runtime
                 KeyValue(KeyCode.D) - KeyValue(KeyCode.A),
                 KeyValue(KeyCode.W) - KeyValue(KeyCode.S));
             input = Vector2.ClampMagnitude(input, 1f);
-            Vector3 velocity = (transform.right * input.x + transform.forward * input.y) * _walkingSpeed;
+            Vector3 velocity = (transform.right * input.x + transform.forward * input.y) * (_walkingSpeed * _interaction.WalkingMultiplier);
             _verticalSpeed = _controller.isGrounded ? -2f : _verticalSpeed + Physics.gravity.y * Time.deltaTime;
             velocity.y = _verticalSpeed;
             _controller.Move(velocity * Time.deltaTime);
 
-            _interaction.UpdateAim(Input.GetKeyDown(KeyCode.E));
+            _interaction.UpdateAim(Input.GetKeyDown(KeyCode.E), Input.GetMouseButtonDown(0));
         }
 
         private static int KeyValue(KeyCode key)

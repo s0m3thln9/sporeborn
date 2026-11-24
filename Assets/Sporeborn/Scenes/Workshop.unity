@@ -21,6 +21,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1002}
+  - component: {fileID: 1200}
   m_Layer: 0
   m_Name: Workshop Geometry
   m_TagString: Untagged
@@ -1439,9 +1440,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3b829f09e38b4dbcadea1c94b9c00009, type: 3}
   m_Name:
   m_EditorClassIdentifier:
-  _cap: {fileID: 1102}
+  _highlightRenderer: {fileID: 1102}
   _roomBounds: {fileID: 1030}
-  _worktableRecoveryPoint: {fileID: 1066}
 --- !u!1 &1099
 GameObject:
   m_ObjectHideFlags: 0
@@ -1619,7 +1619,7 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   _playerCamera: {fileID: 1113}
   _hand: {fileID: 1115}
-  _shippingBox: {fileID: 1094}
+  _batch: {fileID: 1200}
   _pickupPrompt: E   Поднять гриб
   _placePrompt: E   Положить в коробку
   _dropPrompt: E   Отпустить гриб
@@ -1790,6 +1790,20 @@ Light:
   m_RenderingLayerMask: 1
   m_Lightmapping: 4
   m_BounceIntensity: 1
+--- !u!114 &1200
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1001}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4a35117267d94c1a84a08ea8fa2c89bb, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  _mushroomTemplate: {fileID: 1107}
+  _boxTemplate: {fileID: 1094}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

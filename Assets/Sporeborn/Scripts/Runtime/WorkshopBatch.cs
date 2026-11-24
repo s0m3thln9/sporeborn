@@ -1,23 +1,21 @@
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace Sporeborn.Runtime
 {
     public sealed class WorkshopBatch : MonoBehaviour
     {
-        private const int HarvestCount = 12;
         private static readonly int ColorProperty = Shader.PropertyToID("_Color");
 
         [SerializeField] private Carryable _mushroomTemplate;
         [SerializeField] private ShippingBox _boxTemplate;
 
-        private readonly Dictionary<Carryable, Vector3> _landingPositions = new Dictionary<Carryable, Vector3>();
         private readonly ShippingBox[] _boxes = new ShippingBox[3];
         private BoxCollider _roomBounds;
         private Material _material;
         private Carryable _printedLabel;
         private Vector3 _printerOutput;
 
+        public WorkshopGrowth Growth { get; private set; }
         public Collider Printer { get; private set; }
         public Collider Dispatch { get; private set; }
         public int Money { get; private set; }
@@ -37,29 +35,20 @@ namespace Sporeborn.Runtime
 
             _roomBounds = _mushroomTemplate.RoomBounds;
             _material = _boxTemplate.Material;
-            BuildHarvest();
+            Vector3 harvestPosition = _mushroomTemplate.transform.position;
+            _mushroomTemplate.gameObject.SetActive(false);
+            Growth = new WorkshopGrowth(transform, _mushroomTemplate, _material, _roomBounds, harvestPosition);
+            BuildKnife(harvestPosition);
             BuildPackingStation();
         }
 
-        private void BuildHarvest()
+        private void Update()
         {
-            Vector3 platform = _mushroomTemplate.transform.position;
-            Vector3 tray = platform + new Vector3(0f, -0.035f, 0.32f);
-            CreateBlock("Growing tray", transform, tray, new Vector3(0.4f, 0.054f, 0.27f), _material,
-                new Color(0.22f, 0.18f, 0.14f));
+            Growth?.Tick(Time.deltaTime);
+        }
 
-            for (int index = 0; index < HarvestCount; index++)
-            {
-                Vector3 offset = new Vector3((index % 4 - 1.5f) * 0.083f, 0f, (index / 4 - 1f) * 0.076f);
-                Carryable mushroom = index == 0 ? _mushroomTemplate : Instantiate(_mushroomTemplate);
-                mushroom.name = $"Mushroom {index + 1}";
-                Vector3 landing = platform + offset;
-                mushroom.Configure(Carryable.ItemKind.Mushroom, 0.022f, _roomBounds, landing);
-                mushroom.Place(tray + offset + Vector3.up * 0.049f);
-                mushroom.SetRooted();
-                _landingPositions.Add(mushroom, landing);
-            }
-
+        private void BuildKnife(Vector3 platform)
+        {
             var knife = new GameObject("Harvest knife");
             knife.transform.position = platform + new Vector3(0.33f, -0.048f, -0.02f);
             Renderer blade = CreateBlock("Blade", knife.transform, new Vector3(0f, 0f, 0.06f),
@@ -87,16 +76,16 @@ namespace Sporeborn.Runtime
                 new Vector3(0.24f, 0.12f, 0.21f), _material, new Color(0.25f, 0.33f, 0.40f));
             Printer = printer.GetComponent<Collider>();
             _printerOutput = printer.transform.position + new Vector3(0f, 0.063f, -0.048f);
-            AddStationText(printer.transform.position + Vector3.up * 0.061f, "ПЕЧАТЬ");
+            AddStationText(transform, printer.transform.position + Vector3.up * 0.061f, "ПЕЧАТЬ");
             GameObject dispatch = CreateBlock("Dispatch zone", transform, new Vector3(1.88f, 0.40f, 0.56f),
                 new Vector3(0.55f, 0.8f, 0.55f), _material, new Color(0.36f, 0.54f, 0.42f));
             Dispatch = dispatch.GetComponent<Collider>();
-            AddStationText(dispatch.transform.position + new Vector3(0f, 0.401f, -0.21f), "ОТПРАВКА");
+            AddStationText(transform, dispatch.transform.position + new Vector3(0f, 0.401f, -0.21f), "ОТПРАВКА");
         }
 
         public bool TryCut(Carryable mushroom)
         {
-            return _landingPositions.TryGetValue(mushroom, out Vector3 landing) && mushroom.TryCut(landing);
+            return Growth.TryCut(mushroom);
         }
 
         public ShippingBox FindReceivingBox(Ray aim, float obstruction)
@@ -175,12 +164,12 @@ namespace Sporeborn.Runtime
             return block;
         }
 
-        private void AddStationText(Vector3 position, string text)
+        internal static void AddStationText(Transform parent, Vector3 position, string text, float size = 0.004f)
         {
             var sign = new GameObject(text);
-            sign.transform.SetParent(transform, false);
+            sign.transform.SetParent(parent, false);
             sign.transform.position = position;
-            AddText(sign.transform, text, 0.004f, Color.white);
+            AddText(sign.transform, text, size, Color.white);
         }
 
         public static void AddText(Transform parent, string text, float size, Color color)

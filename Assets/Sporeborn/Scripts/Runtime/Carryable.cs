@@ -1,53 +1,125 @@
+using System.Collections;
 using UnityEngine;
 
 namespace Sporeborn.Runtime
 {
-    [RequireComponent(typeof(Rigidbody), typeof(SphereCollider))]
-    public sealed class LooseMushroom : MonoBehaviour
+    [RequireComponent(typeof(Rigidbody))]
+    public sealed class Carryable : MonoBehaviour
     {
         private const int RoomLayerMask = 1;
         private static readonly int ColorProperty = Shader.PropertyToID("_Color");
         private static readonly Color HighlightColor = new Color(1f, 0.9f, 0.76f);
 
-        [SerializeField] private Renderer _cap;
+        [SerializeField] private Renderer _highlightRenderer;
         [SerializeField] private BoxCollider _roomBounds;
-        [SerializeField] private Transform _worktableRecoveryPoint;
 
         private Rigidbody _body;
-        private SphereCollider _collider;
+        private Collider[] _colliders;
         private MaterialPropertyBlock _highlight;
+        private MaterialPropertyBlock _originalAppearance;
         private State _state;
         private Vector3 _lastReachablePosition;
         private Quaternion _lastReachableRotation;
 
+        public BoxCollider RoomBounds => _roomBounds;
         public bool IsHeld => _state == State.Held;
         public bool CanPickUp => isActiveAndEnabled && (_state == State.Available || _state == State.Falling);
-        public float Radius => _collider.radius;
+        public float Radius { get; private set; } = 0.022f;
+        public bool CanCut => _state == State.Rooted;
+        public ItemKind Kind { get; private set; }
+        public string ItemName => Kind switch
+        {
+            ItemKind.Knife => "нож",
+            ItemKind.Box => "коробку",
+            ItemKind.Label => "этикетку",
+            _ => "гриб"
+        };
+
+        public enum ItemKind
+        {
+            Mushroom,
+            Knife,
+            Box,
+            Label
+        }
 
         private enum State
         {
             Available,
             Held,
             Falling,
-            Stored
+            Stored,
+            Rooted,
+            BeingCut
         }
 
         private void Awake()
         {
             _body = GetComponent<Rigidbody>();
-            _collider = GetComponent<SphereCollider>();
+            _body.isKinematic = true;
             _highlight = new MaterialPropertyBlock();
             _highlight.SetColor(ColorProperty, HighlightColor);
+            _colliders = GetComponentsInChildren<Collider>();
+        }
 
-            if (_cap == null || _roomBounds == null || _worktableRecoveryPoint == null)
+        public void Configure(ItemKind kind, float radius, BoxCollider roomBounds, Vector3 recoveryPosition,
+            Renderer highlightRenderer = null)
+        {
+            Kind = kind;
+            Radius = radius;
+            _roomBounds = roomBounds;
+            _highlightRenderer = highlightRenderer != null ? highlightRenderer : _highlightRenderer;
+            if (_highlightRenderer != null)
             {
-                Debug.LogError("Assign the mushroom cap, room bounds, and worktable recovery point.", this);
-                enabled = false;
-                return;
+                _originalAppearance = new MaterialPropertyBlock();
+                _highlightRenderer.GetPropertyBlock(_originalAppearance);
             }
 
-            _lastReachablePosition = _worktableRecoveryPoint.position;
-            _lastReachableRotation = _worktableRecoveryPoint.rotation;
+            _lastReachablePosition = recoveryPosition;
+            _lastReachableRotation = Quaternion.identity;
+        }
+
+        public void SetRooted()
+        {
+            _state = State.Rooted;
+        }
+
+        public bool TryCut(Vector3 landingPosition)
+        {
+            if (!CanCut)
+            {
+                return false;
+            }
+
+            _state = State.BeingCut;
+            SetColliders(false);
+            StartCoroutine(MoveToPlatform(landingPosition));
+            return true;
+        }
+
+        private IEnumerator MoveToPlatform(Vector3 landingPosition)
+        {
+            Vector3 start = transform.position;
+            const float duration = 0.24f;
+            for (float elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime)
+            {
+                float progress = elapsed / duration;
+                transform.position = Vector3.Lerp(start, landingPosition, progress)
+                    + Vector3.up * (0.08f * Mathf.Sin(progress * Mathf.PI));
+                yield return null;
+            }
+
+            Place(landingPosition);
+        }
+
+        public void Place(Vector3 position)
+        {
+            transform.SetParent(null, true);
+            _body.isKinematic = true;
+            _body.position = position;
+            _body.rotation = Quaternion.identity;
+            _state = State.Available;
+            SetColliders(true);
         }
 
         private void FixedUpdate()
@@ -79,7 +151,10 @@ namespace Sporeborn.Runtime
 
         public void SetHighlighted(bool highlighted)
         {
-            _cap.SetPropertyBlock(highlighted ? _highlight : null);
+            if (_highlightRenderer != null)
+            {
+                _highlightRenderer.SetPropertyBlock(highlighted ? _highlight : _originalAppearance);
+            }
         }
 
         public bool TryPickUp(Transform hand)
@@ -97,7 +172,7 @@ namespace Sporeborn.Runtime
 
             _state = State.Held;
             _body.isKinematic = true;
-            _collider.enabled = false;
+            SetColliders(false);
             AttachTo(hand, Vector3.zero);
             return true;
         }
@@ -106,8 +181,11 @@ namespace Sporeborn.Runtime
         {
             transform.SetParent(null, true);
             _state = State.Falling;
-            _collider.enabled = true;
-            Physics.IgnoreCollision(_collider, player);
+            SetColliders(true);
+            foreach (Collider itemCollider in _colliders)
+            {
+                Physics.IgnoreCollision(itemCollider, player);
+            }
             _body.isKinematic = false;
             _body.linearVelocity = Vector3.zero;
             _body.angularVelocity = Vector3.zero;
@@ -117,7 +195,16 @@ namespace Sporeborn.Runtime
         public void Store(Transform box, Vector3 position)
         {
             _state = State.Stored;
+            SetColliders(false);
             AttachTo(box, position);
+        }
+
+        private void SetColliders(bool enabled)
+        {
+            foreach (Collider itemCollider in _colliders)
+            {
+                itemCollider.enabled = enabled;
+            }
         }
 
         private void AttachTo(Transform parent, Vector3 position)
@@ -136,7 +223,7 @@ namespace Sporeborn.Runtime
 
         private bool HasPickupPosition()
         {
-            Vector3 target = _body.position;
+            Vector3 target = _body.worldCenterOfMass;
             Bounds room = _roomBounds.bounds;
 
             for (int direction = 0; direction < 8; direction++)
@@ -165,7 +252,7 @@ namespace Sporeborn.Runtime
 
             Vector3 toMushroom = target - eyes;
             return Physics.Raycast(eyes, toMushroom.normalized, out RaycastHit hit,
-                MushroomInteraction.RangeMeters, RoomLayerMask, QueryTriggerInteraction.Ignore) && hit.collider == _collider;
+                MushroomInteraction.RangeMeters, RoomLayerMask, QueryTriggerInteraction.Ignore) && hit.collider.attachedRigidbody == _body;
         }
     }
 }

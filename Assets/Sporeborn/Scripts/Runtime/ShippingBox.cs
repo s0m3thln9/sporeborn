@@ -152,7 +152,8 @@ namespace Sporeborn.Runtime
 
         private void ShowLabel(Carryable label)
         {
-            WorkshopBatch.AddText(label.transform, $"{_contents.Count} шт.  ·  {_contents.Price}", 0.0021f, Color.black);
+            WorkshopBatch.AddSign(label.transform, label.transform.TransformPoint(0f, 0.004f, 0f),
+                label.transform.rotation * Quaternion.Euler(90f, 0f, 0f), $"{_contents.Count} шт.  ·  {_contents.Price}", 0.0021f, Color.black, new Vector2(0.075f, 0.048f));
         }
 
         internal BoxSave Capture() => new BoxSave { id = Item.Id, flaps = _contents.ClosedFlaps, confirmed = _closingConfirmed };

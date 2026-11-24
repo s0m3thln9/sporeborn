@@ -20,7 +20,7 @@ namespace Sporeborn.Runtime
         private readonly Dictionary<Collider, Station> _slots = new Dictionary<Collider, Station>();
         private readonly Dictionary<Collider, Station> _starts = new Dictionary<Collider, Station>();
         private readonly Transform[] _doorPanels = new Transform[3];
-        private readonly TextMesh[] _deviceDisplays = new TextMesh[3];
+        private readonly WorkshopSign[] _deviceDisplays = new WorkshopSign[3];
         private readonly WorkshopSounds _sounds;
         private readonly Transform[] _docks = new Transform[3];
         private readonly Carryable[] _crop = new Carryable[MushroomCount];
@@ -50,8 +50,8 @@ namespace Sporeborn.Runtime
 
             Block("Preparation bench", room, new Vector3(-1.97f, 0.44f, -0.27f),
                 new Vector3(0.9f, 0.88f, 1.79f), new Color(0.38f, 0.30f, 0.24f));
-            WorkshopBatch.AddFrontText(room, new Vector3(-1.51f, 0.71f, -0.27f), "ПОДГОТОВКА", 0.038f, Color.white)
-                .transform.rotation = Quaternion.Euler(0f, -90f, 0f);
+            WorkshopBatch.AddSign(room, new Vector3(-1.518f, 0.71f, -0.27f), Quaternion.Euler(0f, -90f, 0f),
+                "ПОДГОТОВКА", 0.038f, Color.white, new Vector2(0.76f, 0.11f));
             for (int index = 0; index < Portions.Length; index++)
             {
                 float z = -1f + index * 0.35f;
@@ -59,7 +59,8 @@ namespace Sporeborn.Runtime
                     new Vector3(0.26f, 0.16f, 0.24f),
                     index == 3 ? new Color(0.36f, 0.63f, 0.79f) : new Color(0.62f, 0.52f, 0.36f));
                 _sources.Add(source.GetComponent<Collider>(), (Portion)index);
-                Sign(new Vector3(-2.19f, 1.04f, z), Portions[index], 0.023f);
+                WorkshopBatch.AddSign(room, new Vector3(-2.058f, 0.96f, z), Quaternion.Euler(0f, -90f, 0f),
+                    Portions[index], 0.023f, Color.black, new Vector2(0.206f, 0.066f));
             }
 
             _jarLid = Block("Culture jar lid", room, new Vector3(-2.19f, 1.048f, 0.4f),
@@ -86,7 +87,8 @@ namespace Sporeborn.Runtime
                 new Color(0.60f, 0.64f, 0.68f));
             _waste = Block("Disposal", room, new Vector3(-2.04f, 0.37f, 1.16f),
                 new Vector3(0.48f, 0.74f, 0.40f), new Color(0.32f, 0.29f, 0.28f)).GetComponent<Collider>();
-            Sign(new Vector3(-2.04f, 0.74f, 1.16f), "Утилизация", 0.0035f);
+            WorkshopBatch.AddFrontText(room, new Vector3(-2.04f, 0.66f, 0.958f),
+                "Утилизация", 0.026f, Color.white, new Vector2(0.43f, 0.067f));
             for (int index = 0; index < Stations.Length; index++)
             {
                 BuildDevice((Station)index, new Vector3(-1.57f + index * 1.57f, 0f, 2.69f));
@@ -546,9 +548,9 @@ namespace Sporeborn.Runtime
             for (int index = 0; index < _deviceDisplays.Length; index++)
             {
                 string status = DeviceReading((Station)index);
-                if (_deviceDisplays[index].text != status)
+                if (_deviceDisplays[index].Text != status)
                 {
-                    _deviceDisplays[index].text = status;
+                    _deviceDisplays[index].Text = status;
                 }
             }
         }
@@ -679,12 +681,12 @@ namespace Sporeborn.Runtime
             _doorPanels[index] = doorRoot.transform;
             _starts.Add(Block("Start button", root, new Vector3(0.48f, 0.97f, -0.29f),
                 new Vector3(0.11f, 0.13f, 0.12f), new Color(0.52f, 0.72f, 0.31f)).GetComponent<Collider>(), station);
-            var badge = Block("Status panel", root, new Vector3(0f, 1.32f, -0.365f),
-                new Vector3(0.78f, 0.12f, 0.02f), new Color(0.14f, 0.23f, 0.28f));
+            var badge = Block("Status panel", root, new Vector3(0f, 1.36f, -0.365f),
+                new Vector3(0.78f, 0.17f, 0.02f), new Color(0.14f, 0.23f, 0.28f));
             badge.GetComponent<Collider>().enabled = false;
-            WorkshopBatch.AddFrontText(root, root.TransformPoint(0f, 1.35f, -0.38f), Stations[index], 0.028f, Color.white);
-            _deviceDisplays[index] = WorkshopBatch.AddFrontText(root, root.TransformPoint(0f, 1.30f, -0.38f),
-                "Пусто", 0.022f, new Color(0.66f, 1f, 0.83f));
+            WorkshopBatch.AddFrontText(root, root.TransformPoint(0f, 1.393f, -0.377f), Stations[index], 0.024f, Color.white, new Vector2(0.70f, 0.049f));
+            _deviceDisplays[index] = WorkshopBatch.AddFrontText(root, root.TransformPoint(0f, 1.325f, -0.377f),
+                "Пусто", 0.020f, new Color(0.66f, 1f, 0.83f), new Vector2(0.70f, 0.045f));
             var dock = new GameObject("Tray dock");
             dock.transform.SetParent(root, false);
             dock.transform.localPosition = new Vector3(0f, 0.84f, -0.04f);
@@ -733,8 +735,6 @@ namespace Sporeborn.Runtime
         {
             return WorkshopBatch.CreateBlock(name, parent, position, size, _material, color);
         }
-
-        private void Sign(Vector3 position, string text, float size) => WorkshopBatch.AddStationText(_room, position, text, size);
 
         private static void Tint(GameObject block, Color color)
         {

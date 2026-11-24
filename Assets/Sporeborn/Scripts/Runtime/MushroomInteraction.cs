@@ -5,9 +5,9 @@ namespace Sporeborn.Runtime
     [RequireComponent(typeof(CharacterController))]
     public sealed class MushroomInteraction : MonoBehaviour
     {
-        public const float RangeMeters = 1.5f;
+        public const float RangeMeters = 1.75f;
         public const float EyeHeightMeters = 1.4f;
-        public const float ToolRangeMeters = 1f;
+        public const float ToolRangeMeters = 1.2f;
         private const int RoomLayerMask = 1;
 
         [SerializeField] private Camera _playerCamera;
@@ -27,6 +27,8 @@ namespace Sporeborn.Runtime
         private float _cutUntil;
         private Vector3 _handPosition;
         private GUIStyle _promptStyle;
+        private Transform _placementMarker;
+        private string _placementPrompt;
 
         public float WalkingMultiplier => _held != null && _held.Kind == Carryable.ItemKind.Box ? 0.82f : 1f;
 
@@ -57,27 +59,55 @@ namespace Sporeborn.Runtime
             SetAimed(null);
             _prompt = null;
             _detail = null;
+            _placementPrompt = null;
+            if (_placementMarker != null && _placementMarker.gameObject.activeSelf)
+            {
+                _placementMarker.gameObject.SetActive(false);
+            }
         }
 
-        public void UpdateAim(bool interact, bool use, bool drop, float mixingSeconds = 0f)
+        public void UpdateAim(bool interact, bool use, bool drop, float mixingSeconds = 0f, bool forceDrop = false)
         {
             if (!isActiveAndEnabled || !_batch.isActiveAndEnabled || _batch.Growth == null)
             {
                 return;
             }
 
-            if (drop && _held != null)
-            {
-                UpdateHand(_playerCamera.transform.position);
-                _held.Drop(_player);
-                _held = null;
-                _noticeUntil = 0f;
-                ClearAim();
-                return;
-            }
-
             var aim = new Ray(_playerCamera.transform.position, _playerCamera.transform.forward);
             bool hitSomething = Physics.Raycast(aim, out RaycastHit hit, RangeMeters, RoomLayerMask, QueryTriggerInteraction.Ignore);
+            if (_held != null)
+            {
+                UpdateHand(aim.origin);
+                bool wantsPlacement = !forceDrop && hitSomething && hit.normal.y >= 0.85f;
+                var rotation = Quaternion.Euler(0f, transform.eulerAngles.y, 0f);
+                Vector3 position = default;
+                bool canPlace = wantsPlacement && _held.TryGetPlacement(hit, rotation, out position);
+                UpdatePlacementPreview(hit.point, wantsPlacement, canPlace);
+                if (drop)
+                {
+                    if (wantsPlacement && !canPlace)
+                    {
+                        _notice = "Найдите ровное свободное место";
+                        _noticeUntil = Time.time + 1.5f;
+                        return;
+                    }
+
+                    if (canPlace)
+                    {
+                        _held.Place(position, rotation);
+                    }
+                    else
+                    {
+                        _held.Drop(_player);
+                    }
+
+                    _held = null;
+                    _noticeUntil = 0f;
+                    ClearAim();
+                    return;
+                }
+            }
+
             Carryable target = hitSomething && hit.rigidbody != null ? hit.rigidbody.GetComponent<Carryable>() : null;
             ShippingBox targetBox = target != null && target.Kind == Carryable.ItemKind.Box
                 ? target.GetComponent<ShippingBox>() : null;
@@ -102,7 +132,6 @@ namespace Sporeborn.Runtime
                 return;
             }
 
-            UpdateHand(aim.origin);
             bool cuttingTarget = _held.Kind == Carryable.ItemKind.Knife && target != null && target.CanCut;
             SetAimed(cuttingTarget && hit.distance <= ToolRangeMeters ? target : null);
             if (cuttingTarget)
@@ -227,6 +256,27 @@ namespace Sporeborn.Runtime
             }
         }
 
+        private void UpdatePlacementPreview(Vector3 surface, bool wantsPlacement, bool canPlace)
+        {
+            _placementPrompt = canPlace ? "G   Поставить   ·   Shift+G   Бросить"
+                : wantsPlacement ? "Место занято или узко   ·   Shift+G   Бросить"
+                : $"G   Бросить {_held.ItemName}";
+            if (canPlace)
+            {
+                if (_placementMarker == null)
+                {
+                    _placementMarker = _batch.CreatePlacementMarker();
+                }
+
+                _placementMarker.position = surface + Vector3.up * 0.005f;
+                _placementMarker.gameObject.SetActive(true);
+            }
+            else if (_placementMarker != null)
+            {
+                _placementMarker.gameObject.SetActive(false);
+            }
+        }
+
         private void SetAimed(Carryable item)
         {
             if (_aimed == item)
@@ -249,8 +299,8 @@ namespace Sporeborn.Runtime
         private void UpdateHand(Vector3 cameraPosition)
         {
             bool large = _held.Kind == Carryable.ItemKind.Box || _held.Kind == Carryable.ItemKind.Tray;
-            Vector3 localOffset = large ? new Vector3(0.08f, -0.27f, 0.66f) : _handPosition;
-            Vector3 offset = _hand.parent.TransformVector(localOffset);
+            Vector3 localOffset = large ? new Vector3(0.12f, -0.39f, 0.56f) : _handPosition;
+            Vector3 offset = (large ? transform : _hand.parent).TransformVector(localOffset);
             float distance = offset.magnitude;
             Vector3 direction = offset.normalized;
 
@@ -316,7 +366,7 @@ namespace Sporeborn.Runtime
                 float nextRow = centerY + 95f;
                 if (_held != null)
                 {
-                    DrawLabel(new Rect(hintLeft, nextRow, hintWidth, 32f), $"G   Отпустить {_held.ItemName}");
+                    DrawLabel(new Rect(hintLeft, nextRow, hintWidth, 32f), _placementPrompt);
                     nextRow += 36f;
                 }
 

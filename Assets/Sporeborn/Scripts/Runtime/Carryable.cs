@@ -158,11 +158,16 @@ namespace Sporeborn.Runtime
 
         public void Place(Vector3 position)
         {
+            Place(position, Quaternion.identity);
+        }
+
+        internal void Place(Vector3 position, Quaternion rotation)
+        {
             transform.SetParent(null, true);
             _body.isKinematic = true;
-            transform.SetPositionAndRotation(position, Quaternion.identity);
+            transform.SetPositionAndRotation(position, rotation);
             _body.position = position;
-            _body.rotation = Quaternion.identity;
+            _body.rotation = rotation;
             _state = State.Available;
             SetColliders(true);
         }
@@ -303,10 +308,105 @@ namespace Sporeborn.Runtime
             return true;
         }
 
+        internal bool TryGetPlacement(RaycastHit surface, Quaternion rotation, out Vector3 position)
+        {
+            float lowest = float.PositiveInfinity;
+            Bounds footprint = default;
+            bool found = false;
+            foreach (Collider collider in _colliders)
+            {
+                GetPlacementShape(collider, rotation, out Vector3 center, out Vector3 half, out Quaternion orientation);
+                Vector3 extent = ProjectExtents(orientation, half);
+                float bottom = center.y - extent.y;
+                var bounds = new Bounds(center, extent * 2f);
+                if (!found || bottom < lowest - 0.014f)
+                {
+                    footprint = bounds;
+                    lowest = bottom;
+                    found = true;
+                }
+                else if (bottom <= lowest + 0.014f)
+                {
+                    footprint.Encapsulate(bounds);
+                    lowest = Mathf.Min(lowest, bottom);
+                }
+            }
+
+            position = surface.point + Vector3.up * (0.002f - lowest);
+            if (!found || !_roomBounds.bounds.Contains(position))
+            {
+                return false;
+            }
+
+            Vector3 span = footprint.extents * 0.78f;
+            Vector3 supportCenter = surface.point + new Vector3(footprint.center.x, 0.065f, footprint.center.z);
+            for (int x = -1; x <= 1; x += 2)
+            {
+                for (int z = -1; z <= 1; z += 2)
+                {
+                    Vector3 probe = supportCenter + new Vector3(x * span.x, 0f, z * span.z);
+                    if (!Physics.Raycast(probe, Vector3.down, out RaycastHit support, 0.092f,
+                        RoomLayerMask, QueryTriggerInteraction.Ignore) || support.normal.y < 0.85f ||
+                        Mathf.Abs(support.point.y - surface.point.y) > 0.018f)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            foreach (Collider collider in _colliders)
+            {
+                GetPlacementShape(collider, rotation, out Vector3 center, out Vector3 half, out Quaternion orientation);
+                var inset = new Vector3(Mathf.Max(0.001f, half.x - 0.003f), Mathf.Max(0.001f, half.y - 0.003f),
+                    Mathf.Max(0.001f, half.z - 0.003f));
+                if (Physics.CheckBox(position + center, inset, orientation, RoomLayerMask | (1 << 2),
+                    QueryTriggerInteraction.Ignore))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private void GetPlacementShape(Collider collider, Quaternion rotation, out Vector3 center,
+            out Vector3 half, out Quaternion orientation)
+        {
+            Transform shape = collider.transform;
+            orientation = rotation * Quaternion.Inverse(transform.rotation) * shape.rotation;
+            Vector3 sourceCenter = Vector3.zero;
+            Vector3 size = Vector3.one * 0.044f;
+            if (collider is BoxCollider box)
+            {
+                sourceCenter = box.center;
+                size = box.size;
+            }
+            else if (collider is SphereCollider sphere)
+            {
+                sourceCenter = sphere.center;
+                size = Vector3.one * (sphere.radius * 2f);
+            }
+
+            center = rotation * transform.InverseTransformPoint(shape.TransformPoint(sourceCenter));
+            half = Vector3.Scale(size * 0.5f, shape.lossyScale);
+        }
+
+        private static Vector3 ProjectExtents(Quaternion orientation, Vector3 half)
+        {
+            Vector3 x = orientation * Vector3.right * half.x;
+            Vector3 y = orientation * Vector3.up * half.y;
+            Vector3 z = orientation * Vector3.forward * half.z;
+            return new Vector3(Mathf.Abs(x.x) + Mathf.Abs(y.x) + Mathf.Abs(z.x),
+                Mathf.Abs(x.y) + Mathf.Abs(y.y) + Mathf.Abs(z.y),
+                Mathf.Abs(x.z) + Mathf.Abs(y.z) + Mathf.Abs(z.z));
+        }
+
         public void Drop(CharacterController player)
         {
             transform.SetParent(null, true);
             _state = State.Falling;
+            _body.position = transform.position;
+            _body.rotation = transform.rotation;
             SetColliders(true);
             foreach (Collider itemCollider in _colliders)
             {

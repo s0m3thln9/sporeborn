@@ -15,7 +15,7 @@ namespace Sporeborn.Runtime
         private Carryable _printedLabel;
         private Vector3 _printerOutput;
         private int _nextLabel = 1;
-        private TextMesh _scaleDisplay;
+        private WorkshopSign _scaleDisplay;
         private int _displayedWeight = -1;
 
         public WorkshopSession Session { get; private set; }
@@ -94,24 +94,24 @@ namespace Sporeborn.Runtime
                 new Vector3(0.24f, 0.12f, 0.21f), _material, new Color(0.25f, 0.33f, 0.40f));
             Printer = printer.GetComponent<Collider>();
             _printerOutput = printer.transform.position + new Vector3(0f, 0.063f, -0.048f);
-            AddFrontText(transform, printer.transform.position + new Vector3(0f, 0.025f, -0.107f), "ПЕЧАТЬ", 0.017f, Color.white);
-            GameObject dispatch = CreateBlock("Dispatch zone", transform, new Vector3(1.88f, 0.40f, 0.56f),
+            AddFrontText(transform, printer.transform.position + new Vector3(0f, 0.025f, -0.107f), "ПЕЧАТЬ", 0.017f, Color.white, new Vector2(0.21f, 0.045f));
+            GameObject dispatch = CreateBlock("Dispatch zone", transform, new Vector3(2.70f, 0.40f, 0.56f),
                 new Vector3(0.55f, 0.8f, 0.55f), _material, new Color(0.36f, 0.54f, 0.42f));
             Dispatch = dispatch.GetComponent<Collider>();
-            AddFrontText(transform, dispatch.transform.position + new Vector3(0f, 0.31f, -0.277f), "ОТПРАВКА", 0.025f, Color.white);
+            AddFrontText(transform, dispatch.transform.position + new Vector3(0f, 0.31f, -0.277f), "ОТПРАВКА", 0.025f, Color.white, new Vector2(0.47f, 0.060f));
             BuildScale();
         }
 
         private void BuildScale()
         {
-            var position = new Vector3(1.88f, 0.4f, 1.46f);
+            var position = new Vector3(2.70f, 0.4f, -0.55f);
             CreateBlock("Scale stand", transform, position, new Vector3(0.54f, 0.8f, 0.54f),
                 _material, new Color(0.25f, 0.34f, 0.47f));
             Scale = CreateBlock("Scale platform", transform, position + Vector3.up * 0.423f,
                 new Vector3(0.51f, 0.046f, 0.49f), _material, new Color(0.62f, 0.72f, 0.78f)).GetComponent<Collider>();
-            AddFrontText(transform, position + new Vector3(0f, 0.33f, -0.272f), "ВЕСЫ", 0.032f, Color.white);
+            AddFrontText(transform, position + new Vector3(0f, 0.33f, -0.272f), "ВЕСЫ", 0.032f, Color.white, new Vector2(0.47f, 0.056f));
             _scaleDisplay = AddFrontText(transform, position + new Vector3(0f, 0.25f, -0.272f), "—", 0.024f,
-                new Color(0.66f, 1f, 0.83f));
+                new Color(0.66f, 1f, 0.83f), new Vector2(0.47f, 0.046f));
         }
 
         public string ScaleReading
@@ -169,7 +169,7 @@ namespace Sporeborn.Runtime
             if (weight != _displayedWeight)
             {
                 _displayedWeight = weight;
-                _scaleDisplay.text = weight < 0 ? "—" : ScaleReading;
+                _scaleDisplay.Text = weight < 0 ? "—" : ScaleReading;
             }
         }
 
@@ -262,35 +262,34 @@ namespace Sporeborn.Runtime
             return block;
         }
 
-        internal static void AddStationText(Transform parent, Vector3 position, string text, float size = 0.004f)
-        {
-            var sign = new GameObject(text);
-            sign.transform.SetParent(parent, false);
-            sign.transform.position = position;
-            AddText(sign.transform, text, size, Color.white);
-        }
-
-        internal static TextMesh AddFrontText(Transform parent, Vector3 position, string text, float size, Color color)
-        {
-            TextMesh mesh = AddText(parent, text, size, color);
-            mesh.transform.position = position;
-            mesh.transform.rotation = Quaternion.identity;
-            return mesh;
-        }
-
-        public static TextMesh AddText(Transform parent, string text, float size, Color color)
+        internal static WorkshopSign AddSign(Transform parent, Vector3 worldPosition, Quaternion worldRotation,
+            string text, float size, Color color, Vector2 limits)
         {
             var caption = new GameObject("Caption");
             caption.transform.SetParent(parent, false);
-            caption.transform.SetLocalPositionAndRotation(Vector3.up * 0.004f, Quaternion.Euler(90f, 0f, 0f));
-            TextMesh mesh = caption.AddComponent<TextMesh>();
-            mesh.text = text;
-            mesh.anchor = TextAnchor.MiddleCenter;
-            mesh.alignment = TextAlignment.Center;
-            mesh.fontSize = 32;
-            mesh.characterSize = size;
-            mesh.color = color;
-            return mesh;
+            caption.transform.SetPositionAndRotation(worldPosition, worldRotation);
+            var sign = caption.AddComponent<WorkshopSign>();
+            sign.Configure(text, size, color, limits);
+            return sign;
+        }
+
+        internal static WorkshopSign AddFrontText(Transform parent, Vector3 position, string text, float size,
+            Color color, Vector2 limits)
+        {
+            return AddSign(parent, position, Quaternion.identity, text, size, color, limits);
+        }
+
+        internal Transform CreatePlacementMarker()
+        {
+            var root = new GameObject("Placement marker");
+            root.transform.SetParent(transform, false);
+            var markerColor = new Color(0.31f, 0.95f, 0.64f);
+            CreateBlock("Horizontal", root.transform, Vector3.zero, new Vector3(0.14f, 0.003f, 0.012f), _material, markerColor)
+                .GetComponent<Collider>().enabled = false;
+            CreateBlock("Vertical", root.transform, Vector3.zero, new Vector3(0.012f, 0.003f, 0.14f), _material, markerColor)
+                .GetComponent<Collider>().enabled = false;
+            root.SetActive(false);
+            return root.transform;
         }
     }
 }

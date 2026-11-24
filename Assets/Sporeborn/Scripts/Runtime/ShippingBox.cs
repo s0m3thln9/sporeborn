@@ -52,7 +52,7 @@ namespace Sporeborn.Runtime
                 transform.GetChild(0).GetComponent<Renderer>(), id);
         }
 
-        public bool CanReceive(Ray aim, float rangeMeters, float obstructionDistance, out float distance)
+        public bool CanReceive(Ray aim, float rangeMeters, RaycastHit obstruction, out float distance)
         {
             distance = 0f;
             if (!_contents.HasSpace || !Item.CanPickUp || Vector3.Dot(aim.direction, transform.up) >= 0f)
@@ -61,7 +61,13 @@ namespace Sporeborn.Runtime
             }
 
             var opening = new Plane(transform.up, transform.TransformPoint(0f, _openingHeight, 0f));
-            if (!opening.Raycast(aim, out distance) || distance > rangeMeters || distance > obstructionDistance)
+            if (!opening.Raycast(aim, out distance) || distance > rangeMeters)
+            {
+                return false;
+            }
+
+            if (obstruction.collider != null && distance > obstruction.distance &&
+                (distance - obstruction.distance > _placementTolerance || System.Array.IndexOf(_flaps, obstruction.collider) < 0))
             {
                 return false;
             }

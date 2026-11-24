@@ -95,14 +95,14 @@ namespace Sporeborn.Runtime
             return Growth.TryCut(mushroom);
         }
 
-        public ShippingBox FindReceivingBox(Ray aim, float obstruction)
+        public ShippingBox FindReceivingBox(Ray aim, RaycastHit obstruction)
         {
             ShippingBox closest = null;
-            float nearest = obstruction;
+            float nearest = MushroomInteraction.RangeMeters;
             foreach (ShippingBox box in _boxes)
             {
                 if (box != null && box.isActiveAndEnabled &&
-                    box.CanReceive(aim, MushroomInteraction.RangeMeters, nearest, out float distance))
+                    box.CanReceive(aim, nearest, obstruction, out float distance))
                 {
                     closest = box;
                     nearest = distance;

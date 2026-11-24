@@ -1622,7 +1622,6 @@ MonoBehaviour:
   _batch: {fileID: 1200}
   _pickupPrompt: E   Поднять гриб
   _placePrompt: E   Положить в коробку
-  _dropPrompt: E   Отпустить гриб
   _resumePrompt: Щелчок   Начать игру
 --- !u!114 &1117
 MonoBehaviour:

@@ -98,7 +98,8 @@ namespace Sporeborn.Runtime
             _controller.Move(velocity * Time.deltaTime);
 
             float mixingSeconds = mouseX != 0f || mouseY != 0f ? Time.deltaTime : 0f;
-            _interaction.UpdateAim(Input.GetKeyDown(KeyCode.E), Input.GetMouseButtonDown(0), mixingSeconds);
+            _interaction.UpdateAim(Input.GetKeyDown(KeyCode.E), Input.GetMouseButtonDown(0),
+                Input.GetKeyDown(KeyCode.G), mixingSeconds);
         }
 
         private static int KeyValue(KeyCode key)

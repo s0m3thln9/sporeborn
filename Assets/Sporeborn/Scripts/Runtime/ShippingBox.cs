@@ -18,6 +18,8 @@ namespace Sporeborn.Runtime
         public string Summary => $"Грибы: {_contents.Count}/{ShippingBoxContents.Columns * ShippingBoxContents.Rows}   Цена: {_contents.Price}";
         public int WeightGrams => _contents.WeightGrams;
         public int Price => _contents.Price;
+        internal bool IsClosed => _contents.IsClosed;
+        internal bool HasLabel => _contents.HasLabel;
         public Carryable Item { get; private set; }
         public Material Material => transform.GetChild(0).GetComponent<Renderer>().sharedMaterial;
         public string LabelPrompt => _contents.HasLabel ? "На коробке уже есть этикетка"

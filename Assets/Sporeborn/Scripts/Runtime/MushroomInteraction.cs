@@ -27,8 +27,11 @@ namespace Sporeborn.Runtime
         private float _cutUntil;
         private Vector3 _handPosition;
         private GUIStyle _promptStyle;
+        private GUIStyle _panelTitleStyle;
         private Transform _placementMarker;
         private string _placementPrompt;
+        private bool _placing;
+        private bool _validPlacement;
 
         public float WalkingMultiplier => _held != null && _held.Kind == Carryable.ItemKind.Box ? 0.82f : 1f;
 
@@ -60,6 +63,8 @@ namespace Sporeborn.Runtime
             _prompt = null;
             _detail = null;
             _placementPrompt = null;
+            _placing = false;
+            _validPlacement = false;
             if (_placementMarker != null && _placementMarker.gameObject.activeSelf)
             {
                 _placementMarker.gameObject.SetActive(false);
@@ -81,8 +86,9 @@ namespace Sporeborn.Runtime
                 bool wantsPlacement = !forceDrop && hitSomething && hit.normal.y >= 0.85f;
                 var rotation = Quaternion.Euler(0f, transform.eulerAngles.y, 0f);
                 Vector3 position = default;
-                bool canPlace = wantsPlacement && _held.TryGetPlacement(hit, rotation, out position);
-                UpdatePlacementPreview(hit.point, wantsPlacement, canPlace);
+                Bounds footprint = default;
+                bool canPlace = wantsPlacement && _held.TryGetPlacement(hit, rotation, out position, out footprint);
+                UpdatePlacementPreview(hit.point, footprint, wantsPlacement, canPlace);
                 if (drop)
                 {
                     if (wantsPlacement && !canPlace)
@@ -216,7 +222,7 @@ namespace Sporeborn.Runtime
 
             if (target == null)
             {
-                _prompt ??= collider == _batch.Scale ? _batch.ScaleReading : _batch.Growth.FirstStep;
+                _prompt ??= collider == _batch.Scale ? _batch.ScaleReading : null;
                 return;
             }
 
@@ -256,8 +262,10 @@ namespace Sporeborn.Runtime
             }
         }
 
-        private void UpdatePlacementPreview(Vector3 surface, bool wantsPlacement, bool canPlace)
+        private void UpdatePlacementPreview(Vector3 surface, Bounds footprint, bool wantsPlacement, bool canPlace)
         {
+            _placing = wantsPlacement;
+            _validPlacement = canPlace;
             _placementPrompt = canPlace ? "G   Поставить   ·   Shift+G   Бросить"
                 : wantsPlacement ? "Место занято или узко   ·   Shift+G   Бросить"
                 : $"G   Бросить {_held.ItemName}";
@@ -268,7 +276,9 @@ namespace Sporeborn.Runtime
                     _placementMarker = _batch.CreatePlacementMarker();
                 }
 
-                _placementMarker.position = surface + Vector3.up * 0.005f;
+                _placementMarker.position = surface + new Vector3(footprint.center.x, 0.008f, footprint.center.z);
+                _placementMarker.localScale = new Vector3(Mathf.Max(0.075f, footprint.size.x), 1f,
+                    Mathf.Max(0.075f, footprint.size.z));
                 _placementMarker.gameObject.SetActive(true);
             }
             else if (_placementMarker != null)
@@ -299,7 +309,7 @@ namespace Sporeborn.Runtime
         private void UpdateHand(Vector3 cameraPosition)
         {
             bool large = _held.Kind == Carryable.ItemKind.Box || _held.Kind == Carryable.ItemKind.Tray;
-            Vector3 localOffset = large ? new Vector3(0.12f, -0.39f, 0.56f) : _handPosition;
+            Vector3 localOffset = large ? new Vector3(0.34f, -0.47f, 0.54f) : _handPosition + new Vector3(0.08f, -0.07f, 0f);
             Vector3 offset = (large ? transform : _hand.parent).TransformVector(localOffset);
             float distance = offset.magnitude;
             Vector3 direction = offset.normalized;
@@ -333,9 +343,16 @@ namespace Sporeborn.Runtime
 
             _promptStyle ??= new GUIStyle(GUI.skin.label)
             {
-                alignment = TextAnchor.MiddleCenter,
+                alignment = TextAnchor.UpperLeft,
                 fontSize = 18,
+                wordWrap = true,
                 normal = { textColor = Color.white }
+            };
+            _panelTitleStyle ??= new GUIStyle(_promptStyle)
+            {
+                fontSize = 14,
+                fontStyle = FontStyle.Bold,
+                normal = { textColor = new Color(0.58f, 0.92f, 0.81f) }
             };
 
             float scale = WorkshopGui.Scale;
@@ -355,52 +372,77 @@ namespace Sporeborn.Runtime
         {
             float centerX = width * 0.5f;
             float centerY = height * 0.5f;
-            float hintWidth = Mathf.Min(635f, width - 24f);
-            float hintLeft = centerX - hintWidth * 0.5f;
             bool isPlaying = Cursor.lockState == CursorLockMode.Locked;
             if (isPlaying)
             {
-                GUI.DrawTexture(new Rect(centerX - 2f, centerY - 2f, 4f, 4f), Texture2D.whiteTexture);
-                if (_batch.Growth.IsIncubating)
-                {
-                    DrawLabel(new Rect(hintLeft, height - 62f, hintWidth, 34f),
-                        "Пока идёт инкубация, поднесите коробку и напечатайте этикетку");
-                }
-
-                DrawLabel(new Rect(width - 172f, 18f, 154f, 34f), $"Деньги: {_batch.Money}");
-                DrawLabel(new Rect(hintLeft, centerY + 59f, hintWidth, 32f), _detail);
-                float nextRow = centerY + 95f;
-                if (_held != null)
-                {
-                    DrawLabel(new Rect(hintLeft, nextRow, hintWidth, 32f), _placementPrompt);
-                    nextRow += 36f;
-                }
-
-                if (Time.time < _noticeUntil)
-                {
-                    DrawLabel(new Rect(hintLeft, nextRow, hintWidth, 34f), _notice);
-                }
+                DrawReticle(centerX, centerY);
+                var money = new Rect(width - 171f, 18f, 153f, 38f);
+                DrawSurface(money, new Color(0.035f, 0.065f, 0.08f, 0.94f));
+                GUI.Label(new Rect(money.x + 12f, money.y + 7f, money.width - 24f, 30f),
+                    $"\u0414\u0435\u043d\u044c\u0433\u0438: {_batch.Money}", _promptStyle);
             }
 
-            DrawLabel(new Rect(hintLeft, centerY + 22f, hintWidth, 34f), isPlaying ? _prompt : _resumePrompt);
+            DrawGuidance(Mathf.Min(390f, width * 0.44f), isPlaying);
         }
 
-        private void DrawLabel(Rect rect, string text)
+        private void DrawGuidance(float panelWidth, bool isPlaying)
         {
-            if (string.IsNullOrEmpty(text))
+            string next = isPlaying ? _batch.NextStep(_held) : _resumePrompt;
+            string notice = isPlaying && Time.time < _noticeUntil ? _notice : null;
+            string context = isPlaying ? _prompt : null;
+            string detail = isPlaying ? _detail : null;
+            string placement = isPlaying && _held != null ? _placementPrompt : null;
+            float textWidth = panelWidth - 28f;
+            float height = 46f + RowHeight(next, textWidth) + RowHeight(context, textWidth) +
+                RowHeight(detail, textWidth) + RowHeight(placement, textWidth) + RowHeight(notice, textWidth);
+
+            DrawSurface(new Rect(18f, 18f, panelWidth, height), new Color(0.035f, 0.065f, 0.08f, 0.94f));
+            GUI.Label(new Rect(32f, 29f, textWidth, 22f), "\u0421\u041b\u0415\u0414\u0423\u042e\u0429\u0418\u0419 \u0428\u0410\u0413", _panelTitleStyle);
+            float y = 52f;
+            DrawRow(next, textWidth, ref y);
+            DrawRow(context, textWidth, ref y);
+            DrawRow(detail, textWidth, ref y);
+            DrawRow(placement, textWidth, ref y);
+            DrawRow(notice, textWidth, ref y);
+        }
+
+        private float RowHeight(string text, float width)
+        {
+            return string.IsNullOrEmpty(text) ? 0f : _promptStyle.CalcHeight(new GUIContent(text), width) + 6f;
+        }
+
+        private void DrawRow(string text, float width, ref float y)
+        {
+            float row = RowHeight(text, width);
+            if (row > 0f)
             {
+                GUI.Label(new Rect(32f, y, width, row), text, _promptStyle);
+                y += row;
+            }
+        }
+
+        private void DrawReticle(float x, float y)
+        {
+            if (!_placing)
+            {
+                DrawSurface(new Rect(x - 2f, y - 2f, 4f, 4f), Color.white);
                 return;
             }
 
-            float labelWidth = _promptStyle.CalcSize(new GUIContent(text)).x + 24f;
-            float actualWidth = Mathf.Min(labelWidth, rect.width);
-            rect.x += (rect.width - actualWidth) * 0.5f;
-            rect.width = actualWidth;
+            Color color = _validPlacement ? new Color(0.31f, 1f, 0.64f) : new Color(1f, 0.55f, 0.42f);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                DrawSurface(new Rect(x + side * 12f - 2f, y - 8f, 4f, 16f), new Color(0.04f, 0.08f, 0.08f));
+                DrawSurface(new Rect(x + side * 12f - 1f, y - 7f, 2f, 14f), color);
+            }
+        }
+
+        private static void DrawSurface(Rect rect, Color color)
+        {
             Color previous = GUI.color;
-            GUI.color = new Color(0.035f, 0.065f, 0.08f, 0.94f);
+            GUI.color = color;
             GUI.DrawTexture(rect, Texture2D.whiteTexture);
             GUI.color = previous;
-            GUI.Label(rect, text, _promptStyle);
         }
     }
 }

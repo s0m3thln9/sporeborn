@@ -128,10 +128,124 @@ namespace Sporeborn.Runtime
             }
         }
 
-        public bool IsIncubating => _cycle.IsWorking(Station.Incubation);
+        internal bool HarvestReady => _cycle.Stage == TrayStage.Harvest && !_cycle.Dock.HasValue;
+        internal bool HasUncutMushrooms => System.Array.Exists(_crop, mushroom => mushroom != null && mushroom.NeedsCut);
+        internal bool HasMushroomsOnPlatform => System.Array.Exists(_crop,
+            mushroom => mushroom != null && mushroom.transform.parent == _tray.transform);
 
-        public string FirstStep => _cycle.Stage == TrayStage.Empty && !_cycle.HasMix && _cropNumber == 1
-            ? "Начните со стола подготовки слева" : null;
+        internal string NextStep(Carryable held)
+        {
+            if (_cycle.Dock is Station station)
+            {
+                string device = Stations[(int)station];
+                if (_cycle.IsWorking(station))
+                {
+                    string wait = $"{device} \u00b7 \u043e\u0441\u0442\u0430\u043b\u043e\u0441\u044c {Mathf.CeilToInt(_cycle.Remaining)} \u0441.";
+                    return station == Station.Incubation
+                        ? $"{wait} \u041f\u043e\u0434\u043d\u0435\u0441\u0438\u0442\u0435 \u043e\u0442\u043a\u0440\u044b\u0442\u0443\u044e \u043a\u043e\u0440\u043e\u0431\u043a\u0443 \u0438 \u043d\u0430\u043f\u0435\u0447\u0430\u0442\u0430\u0439\u0442\u0435 \u044d\u0442\u0438\u043a\u0435\u0442\u043a\u0443."
+                        : wait;
+                }
+
+                if (_cycle.IsDone(station))
+                {
+                    return _cycle.IsOpen(station) ? $"{device} \u00b7 \u0432\u044b\u043d\u044c\u0442\u0435 \u043b\u043e\u0442\u043e\u043a \u041b\u041a\u041c \u043d\u0430 \u043f\u043e\u043b\u043a\u0435."
+                        : $"{device} \u00b7 \u0433\u043e\u0442\u043e\u0432\u043e. \u041e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u0434\u0432\u0435\u0440\u0446\u0443 \u041b\u041a\u041c.";
+                }
+
+                return _cycle.IsOpen(station) ? $"{device} \u00b7 \u0437\u0430\u043a\u0440\u043e\u0439\u0442\u0435 \u0434\u0432\u0435\u0440\u0446\u0443 \u041b\u041a\u041c."
+                    : $"{device} \u00b7 \u043d\u0430\u0436\u043c\u0438\u0442\u0435 \u041b\u041a\u041c \u043d\u0430 \u0437\u0435\u043b\u0451\u043d\u043e\u0439 \u043a\u043d\u043e\u043f\u043a\u0435.";
+            }
+
+            return _cycle.Stage switch
+            {
+                TrayStage.Empty => PreparationStep(held),
+                TrayStage.Mixed => LoadStep(Station.Treatment, true, held),
+                TrayStage.Treated => CultureStep(held),
+                TrayStage.Inoculated => LoadStep(Station.Incubation, true, held),
+                TrayStage.Colonized => LoadStep(Station.Fruiting, false, held),
+                TrayStage.Harvest when _cycle.LidClosed => LidStep(false, held),
+                TrayStage.Harvest when held == _tray => "\u041f\u043e\u0441\u0442\u0430\u0432\u044c\u0442\u0435 \u043b\u043e\u0442\u043e\u043a \u043d\u0430 \u0441\u0442\u043e\u043b (G).",
+                _ => null
+            };
+        }
+
+        private string PreparationStep(Carryable held)
+        {
+            if (_cycle.Stock(Portion.Base) + _cycle.Count(Portion.Base) < 4 ||
+                _cycle.Stock(Portion.Straw) + _cycle.Count(Portion.Straw) < 1 ||
+                _cycle.Stock(Portion.Premix) + _cycle.Count(Portion.Premix) < 1 ||
+                _cycle.Stock(Portion.Water) + _cycle.Count(Portion.Water) < 2 ||
+                _cycle.Stock(Portion.Culture) == 0)
+            {
+                return "Запасов для новой партии больше нет.";
+            }
+
+            if (_cycle.LidClosed)
+            {
+                return LidStep(false, held);
+            }
+
+            if (_cycle.MixReady)
+            {
+                return "\u0413\u043e\u0442\u043e\u0432\u0430\u044f \u0441\u043c\u0435\u0441\u044c. \u0412\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u0451\u043c\u043a\u043e\u0441\u0442\u044c (E) \u0438 \u043f\u0435\u0440\u0435\u043b\u043e\u0436\u0438\u0442\u0435 \u0441\u043c\u0435\u0441\u044c \u0432 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0439 \u043b\u043e\u0442\u043e\u043a (\u041b\u041a\u041c).";
+            }
+
+            if (_cycle.Count(Portion.Base) < 4 || _cycle.Count(Portion.Straw) < 1 || _cycle.Count(Portion.Premix) < 1)
+            {
+                return "\u0421\u0442\u043e\u043b \u043f\u043e\u0434\u0433\u043e\u0442\u043e\u0432\u043a\u0438 \u0441\u043b\u0435\u0432\u0430. \u0412\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u0441\u043e\u0432\u043e\u043a (E). \u041b\u041a\u041c \u043d\u0430\u0431\u0438\u0440\u0430\u0435\u0442 \u0438 \u043f\u0435\u0440\u0435\u043d\u043e\u0441\u0438\u0442 \u043f\u043e\u0440\u0446\u0438\u0438: 4 \u043e\u0441\u043d\u043e\u0432\u044b, 1 \u0441\u043e\u043b\u043e\u043c\u044b \u0438 1 \u043f\u0440\u0435\u043c\u0438\u043a\u0441\u0430.";
+            }
+
+            if (_cycle.Count(Portion.Water) < 2)
+            {
+                return "\u0412\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043a\u0440\u0443\u0436\u043a\u0443 (E) \u0438 \u0434\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u0432 \u0451\u043c\u043a\u043e\u0441\u0442\u044c \u0434\u0432\u0435 \u043f\u043e\u0440\u0446\u0438\u0438 \u0432\u043e\u0434\u044b (\u041b\u041a\u041c).";
+            }
+
+            return "\u0412\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043c\u0435\u0448\u0430\u043b\u043a\u0443 (E) \u0438 \u0434\u0432\u0438\u0433\u0430\u0439\u0442\u0435 \u043c\u044b\u0448\u044c\u044e \u043d\u0430\u0434 \u0441\u043c\u0435\u0441\u044c\u044e 5 \u0441\u0435\u043a\u0443\u043d\u0434.";
+        }
+
+        private string CultureStep(Carryable held)
+        {
+            if (_cycle.LidClosed)
+            {
+                return LidStep(false, held);
+            }
+
+            if (!_cycle.JarOpen && !_cultureLoaded)
+            {
+                return "\u041f\u043e\u043b\u043e\u0436\u0438\u0442\u0435 \u043a\u0440\u044b\u0448\u043a\u0443 \u043d\u0430 \u0441\u0442\u043e\u043b (G) \u0438 \u043e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u0431\u0430\u043d\u043a\u0443 \u043c\u0438\u0446\u0435\u043b\u0438\u044f \u041b\u041a\u041c.";
+            }
+
+            return _cultureLoaded ? "\u0412\u043d\u0435\u0441\u0438\u0442\u0435 \u043c\u0438\u0446\u0435\u043b\u0438\u0439 \u0432 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0439 \u043b\u043e\u0442\u043e\u043a \u041b\u041a\u041c."
+                : "\u0412\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043c\u0435\u0440\u043a\u0443 (E) \u0438 \u043d\u0430\u0431\u0435\u0440\u0438\u0442\u0435 \u043c\u0438\u0446\u0435\u043b\u0438\u0439 \u0438\u0437 \u0431\u0430\u043d\u043a\u0438 (\u041b\u041a\u041c).";
+        }
+
+        private string LoadStep(Station station, bool needsLid, Carryable held)
+        {
+            if (_cycle.LidClosed != needsLid)
+            {
+                return LidStep(needsLid, held);
+            }
+
+            string device = Stations[(int)station];
+            if (!_cycle.IsOpen(station))
+            {
+                return held == _tray ? $"\u041f\u043e\u0441\u0442\u0430\u0432\u044c\u0442\u0435 \u043b\u043e\u0442\u043e\u043a (G) \u0438 \u043e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u0434\u0432\u0435\u0440\u0446\u0443. \u0414\u0430\u043b\u044c\u0448\u0435 \u00b7 {device}."
+                    : $"{device} \u00b7 \u043e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u0434\u0432\u0435\u0440\u0446\u0443 \u041b\u041a\u041c.";
+            }
+
+            return $"{device} \u00b7 \u0432\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043b\u043e\u0442\u043e\u043a (E) \u0438 \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u0435 \u0435\u0433\u043e \u041b\u041a\u041c \u043d\u0430 \u043f\u043e\u043b\u043a\u0435.";
+        }
+
+        private string LidStep(bool close, Carryable held)
+        {
+            if (held == _tray)
+            {
+                return "\u041f\u043e\u0441\u0442\u0430\u0432\u044c\u0442\u0435 \u043b\u043e\u0442\u043e\u043a (G), \u0447\u0442\u043e\u0431\u044b \u043f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u0434\u043e\u0441\u0442\u0443\u043f \u043a \u043a\u0440\u044b\u0448\u043a\u0435.";
+            }
+
+            return close ? "\u0412\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043a\u0440\u044b\u0448\u043a\u0443 (E) \u0438 \u0437\u0430\u043a\u0440\u043e\u0439\u0442\u0435 \u043b\u043e\u0442\u043e\u043a \u041b\u041a\u041c."
+                : "\u041d\u0430\u0432\u0435\u0434\u0438\u0442\u0435 \u043f\u0440\u0438\u0446\u0435\u043b \u043d\u0430 \u043b\u043e\u0442\u043e\u043a \u0438 \u0441\u043d\u0438\u043c\u0438\u0442\u0435 \u043a\u0440\u044b\u0448\u043a\u0443 \u041b\u041a\u041c \u0441\u0432\u043e\u0431\u043e\u0434\u043d\u044b\u043c\u0438 \u0440\u0443\u043a\u0430\u043c\u0438.";
+        }
 
         public bool TryCut(Carryable mushroom)
         {

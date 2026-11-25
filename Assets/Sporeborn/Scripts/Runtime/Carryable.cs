@@ -27,7 +27,8 @@ namespace Sporeborn.Runtime
         public bool IsHeld => _state == State.Held;
         public bool CanPickUp => isActiveAndEnabled && !_covered && (_state == State.Available || _state == State.Falling);
         public float Radius { get; private set; } = 0.022f;
-        public bool CanCut => _state == State.Rooted && !_covered;
+        public bool CanCut => NeedsCut && !_covered;
+        internal bool NeedsCut => _state == State.Rooted;
         private bool _covered;
         private Vector3 _cutLanding;
         public string Id { get; private set; }
@@ -308,10 +309,10 @@ namespace Sporeborn.Runtime
             return true;
         }
 
-        internal bool TryGetPlacement(RaycastHit surface, Quaternion rotation, out Vector3 position)
+        internal bool TryGetPlacement(RaycastHit surface, Quaternion rotation, out Vector3 position, out Bounds footprint)
         {
             float lowest = float.PositiveInfinity;
-            Bounds footprint = default;
+            footprint = default;
             bool found = false;
             foreach (Collider collider in _colliders)
             {

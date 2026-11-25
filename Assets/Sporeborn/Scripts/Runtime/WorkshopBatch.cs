@@ -4,6 +4,7 @@ namespace Sporeborn.Runtime
 {
     public sealed partial class WorkshopBatch : MonoBehaviour
     {
+        private static readonly Quaternion TowardRoom = Quaternion.Euler(0f, 90f, 0f);
         private static readonly int ColorProperty = Shader.PropertyToID("_Color");
 
         [SerializeField] private Carryable _mushroomTemplate;
@@ -98,7 +99,9 @@ namespace Sporeborn.Runtime
             GameObject dispatch = CreateBlock("Dispatch zone", transform, new Vector3(2.70f, 0.40f, 0.56f),
                 new Vector3(0.55f, 0.8f, 0.55f), _material, new Color(0.36f, 0.54f, 0.42f));
             Dispatch = dispatch.GetComponent<Collider>();
-            AddFrontText(transform, dispatch.transform.position + new Vector3(0f, 0.31f, -0.277f), "ОТПРАВКА", 0.025f, Color.white, new Vector2(0.47f, 0.060f));
+            dispatch.transform.rotation = TowardRoom;
+            AddSign(transform, dispatch.transform.position + TowardRoom * new Vector3(0f, 0.31f, -0.277f),
+                TowardRoom, "ОТПРАВКА", 0.025f, Color.white, new Vector2(0.47f, 0.060f));
             BuildScale();
         }
 
@@ -106,11 +109,14 @@ namespace Sporeborn.Runtime
         {
             var position = new Vector3(2.70f, 0.4f, -0.55f);
             CreateBlock("Scale stand", transform, position, new Vector3(0.54f, 0.8f, 0.54f),
-                _material, new Color(0.25f, 0.34f, 0.47f));
+                _material, new Color(0.25f, 0.34f, 0.47f)).transform.rotation = TowardRoom;
             Scale = CreateBlock("Scale platform", transform, position + Vector3.up * 0.423f,
                 new Vector3(0.51f, 0.046f, 0.49f), _material, new Color(0.62f, 0.72f, 0.78f)).GetComponent<Collider>();
-            AddFrontText(transform, position + new Vector3(0f, 0.33f, -0.272f), "ВЕСЫ", 0.032f, Color.white, new Vector2(0.47f, 0.056f));
-            _scaleDisplay = AddFrontText(transform, position + new Vector3(0f, 0.25f, -0.272f), "—", 0.024f,
+            Scale.transform.rotation = TowardRoom;
+            AddSign(transform, position + TowardRoom * new Vector3(0f, 0.33f, -0.272f),
+                TowardRoom, "ВЕСЫ", 0.032f, Color.white, new Vector2(0.47f, 0.056f));
+            _scaleDisplay = AddSign(transform, position + TowardRoom * new Vector3(0f, 0.25f, -0.272f),
+                TowardRoom, "—", 0.024f,
                 new Color(0.66f, 1f, 0.83f), new Vector2(0.47f, 0.046f));
         }
 
@@ -171,6 +177,52 @@ namespace Sporeborn.Runtime
                 _displayedWeight = weight;
                 _scaleDisplay.Text = weight < 0 ? "—" : ScaleReading;
             }
+        }
+
+        internal string NextStep(Carryable held)
+        {
+            string next = Growth.NextStep(held);
+            if (next != null)
+            {
+                return next;
+            }
+
+            if (!Growth.HarvestReady)
+            {
+                return null;
+            }
+
+            if (Growth.HasUncutMushrooms)
+            {
+                return "\u0412\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043d\u043e\u0436 (E) \u0438 \u0441\u0440\u0435\u0436\u044c\u0442\u0435 \u0433\u0440\u0438\u0431\u044b \u041b\u041a\u041c.";
+            }
+
+            if (Growth.HasMushroomsOnPlatform || held != null && held.Kind == Carryable.ItemKind.Mushroom)
+            {
+                return "\u041f\u0435\u0440\u0435\u043b\u043e\u0436\u0438\u0442\u0435 \u0433\u0440\u0438\u0431\u044b \u0441 \u043f\u043b\u043e\u0449\u0430\u0434\u043a\u0438 \u0432 \u043e\u0442\u043a\u0440\u044b\u0442\u0443\u044e \u043a\u043e\u0440\u043e\u0431\u043a\u0443. E \u043f\u043e\u0434\u0431\u0438\u0440\u0430\u0435\u0442 \u0438 \u0443\u043a\u043b\u0430\u0434\u044b\u0432\u0430\u0435\u0442.";
+            }
+
+            foreach (ShippingBox box in _boxes)
+            {
+                if (box == null || !box.isActiveAndEnabled || box.Price == 0)
+                {
+                    continue;
+                }
+
+                if (!box.IsClosed)
+                {
+                    return "\u0417\u0430\u043a\u0440\u043e\u0439\u0442\u0435 \u043a\u043b\u0430\u043f\u0430\u043d\u044b \u041b\u041a\u041c, \u043d\u0430\u0447\u0438\u043d\u0430\u044f \u0441 \u0432\u044b\u0434\u0435\u043b\u0435\u043d\u043d\u043e\u0433\u043e. \u0412\u0435\u0441\u044b \u043c\u043e\u0436\u043d\u043e \u043f\u0440\u043e\u043f\u0443\u0441\u0442\u0438\u0442\u044c.";
+                }
+
+                if (!box.HasLabel)
+                {
+                    return "\u041d\u0430\u043f\u0435\u0447\u0430\u0442\u0430\u0439\u0442\u0435 \u044d\u0442\u0438\u043a\u0435\u0442\u043a\u0443 \u041b\u041a\u041c, \u0432\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u0435\u0451 \u0438 \u043d\u0430\u043a\u043b\u0435\u0439\u0442\u0435 \u043d\u0430 \u043a\u043e\u0440\u043e\u0431\u043a\u0443 \u041b\u041a\u041c.";
+                }
+
+                return "\u041f\u043e\u0434\u043d\u0438\u043c\u0438\u0442\u0435 \u043a\u043e\u0440\u043e\u0431\u043a\u0443 \u0438 \u043d\u0430\u0436\u043c\u0438\u0442\u0435 E \u043d\u0430\u0434 \u0437\u043e\u043d\u043e\u0439 \u043e\u0442\u043f\u0440\u0430\u0432\u043a\u0438.";
+            }
+
+            return "\u0423\u0442\u0438\u043b\u0438\u0437\u0438\u0440\u0443\u0439\u0442\u0435 \u043e\u0442\u0440\u0430\u0431\u043e\u0442\u0430\u043d\u043d\u044b\u0439 \u0441\u0443\u0431\u0441\u0442\u0440\u0430\u0442. \u0412\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043b\u043e\u0442\u043e\u043a \u0438 \u043d\u0430\u0436\u043c\u0438\u0442\u0435 \u041b\u041a\u041c \u043d\u0430\u0434 \u0431\u0430\u043a\u043e\u043c.";
         }
 
         public bool TryCut(Carryable mushroom)
@@ -284,10 +336,14 @@ namespace Sporeborn.Runtime
             var root = new GameObject("Placement marker");
             root.transform.SetParent(transform, false);
             var markerColor = new Color(0.31f, 0.95f, 0.64f);
-            CreateBlock("Horizontal", root.transform, Vector3.zero, new Vector3(0.14f, 0.003f, 0.012f), _material, markerColor)
-                .GetComponent<Collider>().enabled = false;
-            CreateBlock("Vertical", root.transform, Vector3.zero, new Vector3(0.012f, 0.003f, 0.14f), _material, markerColor)
-                .GetComponent<Collider>().enabled = false;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                CreateBlock("Horizontal", root.transform, Vector3.forward * (side * 0.5f),
+                    new Vector3(1f, 0.003f, 0.045f), _material, markerColor).GetComponent<Collider>().enabled = false;
+                CreateBlock("Vertical", root.transform, Vector3.right * (side * 0.5f),
+                    new Vector3(0.045f, 0.003f, 1f), _material, markerColor).GetComponent<Collider>().enabled = false;
+            }
+
             root.SetActive(false);
             return root.transform;
         }

@@ -14,7 +14,7 @@ namespace Sporeborn.Runtime
         [SerializeField] private Transform _hand;
         [SerializeField] private WorkshopBatch _batch;
         [SerializeField] private string _pickupPrompt = "E   Поднять гриб";
-        [SerializeField] private string _placePrompt = "E   Положить в коробку";
+        [SerializeField] private string _placePrompt = "ЛКМ   Положить в коробку";
         [SerializeField] private string _resumePrompt = "Щелчок   Вернуться к игре";
 
         private Carryable _held;
@@ -28,6 +28,7 @@ namespace Sporeborn.Runtime
         private Vector3 _handPosition;
         private GUIStyle _promptStyle;
         private GUIStyle _panelTitleStyle;
+        private GUIStyle _actionStyle;
         private Transform _placementMarker;
         private string _placementPrompt;
         private bool _placing;
@@ -71,7 +72,7 @@ namespace Sporeborn.Runtime
             }
         }
 
-        public void UpdateAim(bool interact, bool use, bool drop, float mixingSeconds = 0f, bool forceDrop = false)
+        public void UpdateAim(bool interact, bool use, bool drop, float mixingSeconds = 0f)
         {
             if (!isActiveAndEnabled || !_batch.isActiveAndEnabled || _batch.Growth == null)
             {
@@ -80,38 +81,20 @@ namespace Sporeborn.Runtime
 
             var aim = new Ray(_playerCamera.transform.position, _playerCamera.transform.forward);
             bool hitSomething = Physics.Raycast(aim, out RaycastHit hit, RangeMeters, RoomLayerMask, QueryTriggerInteraction.Ignore);
+            _placementPrompt = null;
             if (_held != null)
             {
                 UpdateHand(aim.origin);
-                bool wantsPlacement = !forceDrop && hitSomething && hit.normal.y >= 0.85f;
-                var rotation = Quaternion.Euler(0f, transform.eulerAngles.y, 0f);
-                Vector3 position = default;
-                Bounds footprint = default;
-                bool canPlace = wantsPlacement && _held.TryGetPlacement(hit, rotation, out position, out footprint);
-                UpdatePlacementPreview(hit.point, footprint, wantsPlacement, canPlace);
                 if (drop)
                 {
-                    if (wantsPlacement && !canPlace)
-                    {
-                        _notice = "Найдите ровное свободное место";
-                        _noticeUntil = Time.time + 1.5f;
-                        return;
-                    }
-
-                    if (canPlace)
-                    {
-                        _held.Place(position, rotation);
-                    }
-                    else
-                    {
-                        _held.Drop(_player);
-                    }
-
+                    _held.Drop(_player, aim.origin);
                     _held = null;
                     _noticeUntil = 0f;
                     ClearAim();
                     return;
                 }
+
+                _placementPrompt = "G   Бросить";
             }
 
             Carryable target = hitSomething && hit.rigidbody != null ? hit.rigidbody.GetComponent<Carryable>() : null;
@@ -139,7 +122,10 @@ namespace Sporeborn.Runtime
             }
 
             bool cuttingTarget = _held.Kind == Carryable.ItemKind.Knife && target != null && target.CanCut;
-            SetAimed(cuttingTarget && hit.distance <= ToolRangeMeters ? target : null);
+            bool mixingTarget = target != null && target.Kind == Carryable.ItemKind.Bowl &&
+                (_held.Kind == Carryable.ItemKind.Scoop || _held.Kind == Carryable.ItemKind.Cup ||
+                    _held.Kind == Carryable.ItemKind.Mixer);
+            SetAimed((cuttingTarget || mixingTarget) && hit.distance <= ToolRangeMeters ? target : null);
             if (cuttingTarget)
             {
                 _prompt = hit.distance <= ToolRangeMeters ? "ЛКМ   Срезать гриб" : "Подойдите ближе, чтобы срезать гриб";
@@ -168,9 +154,16 @@ namespace Sporeborn.Runtime
             bool weigh = boxOnStand && hit.collider == _batch.Scale;
             _prompt ??= receiving != null ? _placePrompt
                 : dispatch ? _held.GetComponent<ShippingBox>().ShippingPrompt
-                : weigh ? "E   Поставить на весы" : null;
+                : weigh ? "ЛКМ   Поставить на весы" : null;
 
-            if (!interact)
+            if (_prompt == null)
+            {
+                TryPlaceOnSurface(hit, use);
+                return;
+            }
+
+            SetPlacementPreview(default, Quaternion.identity, default, false, false);
+            if (!use)
             {
                 return;
             }
@@ -185,25 +178,43 @@ namespace Sporeborn.Runtime
                     return;
                 }
             }
-            else
+            else if (receiving != null && receiving.TryReceive(_held))
             {
-                if (receiving == null || !receiving.TryReceive(_held))
-                {
-                    if (_held.Kind == Carryable.ItemKind.Mushroom)
-                    {
-                        _notice = "Наведите прицел на открытую коробку со свободным местом";
-                        _noticeUntil = Time.time + 1.5f;
-                    }
-
-                    return;
-                }
-
                 _batch.Sounds.Play(WorkshopSounds.Cue.Pack);
                 _noticeUntil = 0f;
+            }
+            else
+            {
+                return;
             }
 
             _held = null;
             ClearAim();
+        }
+
+        private void TryPlaceOnSurface(RaycastHit hit, bool use)
+        {
+            bool aimedAtSurface = hit.collider != null && hit.normal.y >= 0.85f;
+            var rotation = Quaternion.Euler(0f, transform.eulerAngles.y, 0f);
+            Vector3 position = default;
+            Bounds footprint = default;
+            bool canPlace = aimedAtSurface && _held.TryGetPlacement(hit, rotation, out position, out footprint);
+            SetPlacementPreview(hit.point, rotation, footprint, aimedAtSurface, canPlace);
+            if (canPlace)
+            {
+                _prompt = "ЛКМ   Поставить";
+                if (use)
+                {
+                    _held.Place(position, rotation);
+                    _held = null;
+                    _noticeUntil = 0f;
+                    ClearAim();
+                }
+            }
+            else if (aimedAtSurface)
+            {
+                _prompt = "Нужно свободное место с опорой";
+            }
         }
 
         private void UpdateEmptyHand(Collider collider, Carryable target, ShippingBox box, bool interact, bool use)
@@ -241,13 +252,13 @@ namespace Sporeborn.Runtime
             string flap = box != null ? box.FlapPrompt(collider) : null;
             if (_prompt != null)
             {
-                _detail = _detail == null ? pickup : $"{_detail}   ·   {pickup}";
+                _placementPrompt = pickup;
             }
 
             _prompt ??= flap ?? pickup;
             if (flap != null)
             {
-                _detail = $"{_detail}   ·   {pickup}";
+                _placementPrompt = pickup;
                 if (use)
                 {
                     box.CloseFlap(collider);
@@ -262,13 +273,10 @@ namespace Sporeborn.Runtime
             }
         }
 
-        private void UpdatePlacementPreview(Vector3 surface, Bounds footprint, bool wantsPlacement, bool canPlace)
+        private void SetPlacementPreview(Vector3 surface, Quaternion rotation, Bounds footprint, bool aimedAtSurface, bool canPlace)
         {
-            _placing = wantsPlacement;
+            _placing = aimedAtSurface;
             _validPlacement = canPlace;
-            _placementPrompt = canPlace ? "G   Поставить   ·   Shift+G   Бросить"
-                : wantsPlacement ? "Место занято или узко   ·   Shift+G   Бросить"
-                : $"G   Бросить {_held.ItemName}";
             if (canPlace)
             {
                 if (_placementMarker == null)
@@ -276,7 +284,8 @@ namespace Sporeborn.Runtime
                     _placementMarker = _batch.CreatePlacementMarker();
                 }
 
-                _placementMarker.position = surface + new Vector3(footprint.center.x, 0.008f, footprint.center.z);
+                _placementMarker.SetPositionAndRotation(surface + Vector3.up * 0.008f +
+                    rotation * new Vector3(footprint.center.x, 0f, footprint.center.z), rotation);
                 _placementMarker.localScale = new Vector3(Mathf.Max(0.075f, footprint.size.x), 1f,
                     Mathf.Max(0.075f, footprint.size.z));
                 _placementMarker.gameObject.SetActive(true);
@@ -376,6 +385,7 @@ namespace Sporeborn.Runtime
             if (isPlaying)
             {
                 DrawReticle(centerX, centerY);
+                DrawActionHints(centerX, centerY, Mathf.Min(550f, width - 36f));
                 var money = new Rect(width - 171f, 18f, 153f, 38f);
                 DrawSurface(money, new Color(0.035f, 0.065f, 0.08f, 0.94f));
                 GUI.Label(new Rect(money.x + 12f, money.y + 7f, money.width - 24f, 30f),
@@ -389,20 +399,15 @@ namespace Sporeborn.Runtime
         {
             string next = isPlaying ? _batch.NextStep(_held) : _resumePrompt;
             string notice = isPlaying && Time.time < _noticeUntil ? _notice : null;
-            string context = isPlaying ? _prompt : null;
             string detail = isPlaying ? _detail : null;
-            string placement = isPlaying && _held != null ? _placementPrompt : null;
             float textWidth = panelWidth - 28f;
-            float height = 46f + RowHeight(next, textWidth) + RowHeight(context, textWidth) +
-                RowHeight(detail, textWidth) + RowHeight(placement, textWidth) + RowHeight(notice, textWidth);
+            float height = 46f + RowHeight(next, textWidth) + RowHeight(detail, textWidth) + RowHeight(notice, textWidth);
 
             DrawSurface(new Rect(18f, 18f, panelWidth, height), new Color(0.035f, 0.065f, 0.08f, 0.94f));
             GUI.Label(new Rect(32f, 29f, textWidth, 22f), "\u0421\u041b\u0415\u0414\u0423\u042e\u0429\u0418\u0419 \u0428\u0410\u0413", _panelTitleStyle);
             float y = 52f;
             DrawRow(next, textWidth, ref y);
-            DrawRow(context, textWidth, ref y);
             DrawRow(detail, textWidth, ref y);
-            DrawRow(placement, textWidth, ref y);
             DrawRow(notice, textWidth, ref y);
         }
 
@@ -421,20 +426,64 @@ namespace Sporeborn.Runtime
             }
         }
 
-        private void DrawReticle(float x, float y)
+        private void DrawActionHints(float x, float y, float maxWidth)
         {
-            if (!_placing)
+            string first = _prompt;
+            string second = _placementPrompt;
+            if (string.IsNullOrEmpty(first) && string.IsNullOrEmpty(second))
             {
-                DrawSurface(new Rect(x - 2f, y - 2f, 4f, 4f), Color.white);
                 return;
             }
 
-            Color color = _validPlacement ? new Color(0.31f, 1f, 0.64f) : new Color(1f, 0.55f, 0.42f);
-            for (int side = -1; side <= 1; side += 2)
+            _actionStyle ??= new GUIStyle(_promptStyle) { alignment = TextAnchor.MiddleCenter };
+            float textWidth = Mathf.Min(maxWidth - 24f,
+                Mathf.Max(_actionStyle.CalcSize(new GUIContent(first)).x, _actionStyle.CalcSize(new GUIContent(second)).x) + 4f);
+            float firstHeight = RowHeight(first, textWidth);
+            float secondHeight = RowHeight(second, textWidth);
+            var card = new Rect(x - textWidth * 0.5f - 12f, y + 24f, textWidth + 24f, firstHeight + secondHeight + 8f);
+            DrawSurface(card, new Color(0.035f, 0.065f, 0.08f, 0.94f));
+            if (firstHeight > 0f)
             {
-                DrawSurface(new Rect(x + side * 12f - 2f, y - 8f, 4f, 16f), new Color(0.04f, 0.08f, 0.08f));
-                DrawSurface(new Rect(x + side * 12f - 1f, y - 7f, 2f, 14f), color);
+                GUI.Label(new Rect(card.x + 12f, card.y + 4f, textWidth, firstHeight), first, _actionStyle);
             }
+
+            if (secondHeight > 0f)
+            {
+                GUI.Label(new Rect(card.x + 12f, card.y + 4f + firstHeight, textWidth, secondHeight), second, _actionStyle);
+            }
+        }
+
+        private void DrawReticle(float x, float y)
+        {
+            DrawSurface(new Rect(x - 2f, y - 2f, 4f, 4f), Color.white);
+            if (!_placing)
+            {
+                return;
+            }
+
+            if (_validPlacement)
+            {
+                var color = new Color(0.31f, 1f, 0.64f);
+                DrawStroke(new Vector2(x, y - 21f), new Vector2(x, y - 7f), color);
+                DrawStroke(new Vector2(x - 6f, y - 13f), new Vector2(x, y - 7f), color);
+                DrawStroke(new Vector2(x + 6f, y - 13f), new Vector2(x, y - 7f), color);
+            }
+            else
+            {
+                var color = new Color(1f, 0.55f, 0.42f);
+                DrawStroke(new Vector2(x - 5f, y - 22f), new Vector2(x + 5f, y - 12f), color);
+                DrawStroke(new Vector2(x + 5f, y - 22f), new Vector2(x - 5f, y - 12f), color);
+            }
+        }
+
+        private static void DrawStroke(Vector2 from, Vector2 to, Color color)
+        {
+            Vector2 delta = to - from;
+            Matrix4x4 previous = GUI.matrix;
+            GUIUtility.RotateAroundPivot(Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg, from);
+            DrawSurface(new Rect(from.x - 1f, from.y - 2.5f, delta.magnitude + 2f, 5f), new Color(0.04f, 0.08f, 0.08f));
+            DrawSurface(new Rect(from.x, from.y - 1f, delta.magnitude, 2f), color);
+            GUI.matrix = previous;
         }
 
         private static void DrawSurface(Rect rect, Color color)

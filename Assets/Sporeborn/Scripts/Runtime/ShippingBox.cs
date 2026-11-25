@@ -24,7 +24,7 @@ namespace Sporeborn.Runtime
         public Material Material => transform.GetChild(0).GetComponent<Renderer>().sharedMaterial;
         public string LabelPrompt => _contents.HasLabel ? "На коробке уже есть этикетка"
             : _contents.IsClosed ? "ЛКМ   Наклеить этикетку" : "Сначала закройте коробку";
-        public string ShippingPrompt => ShippingRefusal == null ? "E   Отправить коробку" : $"E   Поставить · {ShippingRefusal}";
+        public string ShippingPrompt => ShippingRefusal == null ? "ЛКМ   Отправить коробку" : $"ЛКМ   Поставить · {ShippingRefusal}";
         public string ShippingRefusal => _contents.Shipment switch
         {
             ShippingBoxContents.ShipmentStatus.Ready => null,

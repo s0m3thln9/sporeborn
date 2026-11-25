@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using Sporeborn.Persistence;
 using UnityEngine;
@@ -261,7 +262,19 @@ namespace Sporeborn.Runtime
                 return;
             }
 
-            if (!_roomBounds.bounds.Contains(_body.position))
+            Bounds room = _roomBounds.bounds;
+            Vector3 position = _body.position;
+            if (position.y < room.min.y && position.x >= room.min.x && position.x <= room.max.x &&
+                position.z >= room.min.z && position.z <= room.max.z)
+            {
+                _body.isKinematic = true;
+                transform.position = new Vector3(position.x, room.min.y + 0.18f, position.z);
+                _state = State.Available;
+                SettleRestoredDrop();
+                return;
+            }
+
+            if (!room.Contains(position))
             {
                 Restore();
                 return;
@@ -314,12 +327,13 @@ namespace Sporeborn.Runtime
             float lowest = float.PositiveInfinity;
             footprint = default;
             bool found = false;
+            Quaternion local = Quaternion.Inverse(rotation);
             foreach (Collider collider in _colliders)
             {
                 GetPlacementShape(collider, rotation, out Vector3 center, out Vector3 half, out Quaternion orientation);
-                Vector3 extent = ProjectExtents(orientation, half);
-                float bottom = center.y - extent.y;
-                var bounds = new Bounds(center, extent * 2f);
+                Vector3 extent = ProjectExtents(local * orientation, half);
+                var bounds = new Bounds(local * center, extent * 2f);
+                float bottom = bounds.min.y;
                 if (!found || bottom < lowest - 0.014f)
                 {
                     footprint = bounds;
@@ -334,25 +348,9 @@ namespace Sporeborn.Runtime
             }
 
             position = surface.point + Vector3.up * (0.002f - lowest);
-            if (!found || !_roomBounds.bounds.Contains(position))
+            if (!found || !_roomBounds.bounds.Contains(position) || !HasEnoughSupport(surface, rotation, footprint))
             {
                 return false;
-            }
-
-            Vector3 span = footprint.extents * 0.78f;
-            Vector3 supportCenter = surface.point + new Vector3(footprint.center.x, 0.065f, footprint.center.z);
-            for (int x = -1; x <= 1; x += 2)
-            {
-                for (int z = -1; z <= 1; z += 2)
-                {
-                    Vector3 probe = supportCenter + new Vector3(x * span.x, 0f, z * span.z);
-                    if (!Physics.Raycast(probe, Vector3.down, out RaycastHit support, 0.092f,
-                        RoomLayerMask, QueryTriggerInteraction.Ignore) || support.normal.y < 0.85f ||
-                        Mathf.Abs(support.point.y - surface.point.y) > 0.018f)
-                    {
-                        return false;
-                    }
-                }
             }
 
             foreach (Collider collider in _colliders)
@@ -368,6 +366,112 @@ namespace Sporeborn.Runtime
             }
 
             return true;
+        }
+
+        private static bool HasEnoughSupport(RaycastHit surface, Quaternion rotation, Bounds footprint)
+        {
+            if (surface.collider is BoxCollider support && Vector3.Dot(support.transform.up, Vector3.up) > 0.999f)
+            {
+                return OverlapsMostOfFootprint(surface.point, rotation, footprint, support);
+            }
+
+            const int grid = 8;
+            int supported = 0;
+            Vector3 corner = footprint.min;
+            for (int x = 0; x < grid; x++)
+            {
+                for (int z = 0; z < grid; z++)
+                {
+                    var point = new Vector3(corner.x + footprint.size.x * (x + 0.5f) / grid, 0.035f,
+                        corner.z + footprint.size.z * (z + 0.5f) / grid);
+                    Vector3 probe = surface.point + rotation * point;
+                    if (Physics.Raycast(probe, Vector3.down, out RaycastHit hit, 0.055f,
+                        RoomLayerMask, QueryTriggerInteraction.Ignore) && hit.collider == surface.collider &&
+                        hit.normal.y >= 0.85f && Mathf.Abs(hit.point.y - surface.point.y) <= 0.018f)
+                    {
+                        supported++;
+                    }
+                }
+            }
+
+            return supported > grid * grid / 2;
+        }
+
+        private static bool OverlapsMostOfFootprint(Vector3 origin, Quaternion rotation, Bounds footprint, BoxCollider support)
+        {
+            Vector3 min = footprint.min;
+            Vector3 max = footprint.max;
+            Span<Vector2> polygon = stackalloc Vector2[12];
+            Span<Vector2> buffer = stackalloc Vector2[12];
+            polygon[0] = SupportLocal(support, origin + rotation * new Vector3(min.x, 0f, min.z));
+            polygon[1] = SupportLocal(support, origin + rotation * new Vector3(max.x, 0f, min.z));
+            polygon[2] = SupportLocal(support, origin + rotation * new Vector3(max.x, 0f, max.z));
+            polygon[3] = SupportLocal(support, origin + rotation * new Vector3(min.x, 0f, max.z));
+
+            float fullArea = PolygonArea(polygon, 4);
+            Vector3 lower = support.center - support.size * 0.5f;
+            Vector3 upper = support.center + support.size * 0.5f;
+            int count = ClipEdge(polygon, 4, buffer, 0, lower.x, 1);
+            count = ClipEdge(buffer, count, polygon, 0, upper.x, -1);
+            count = ClipEdge(polygon, count, buffer, 1, lower.z, 1);
+            count = ClipEdge(buffer, count, polygon, 1, upper.z, -1);
+            return fullArea > 0f && PolygonArea(polygon, count) > fullArea * 0.500001f;
+        }
+
+        private static Vector2 SupportLocal(BoxCollider support, Vector3 world)
+        {
+            Vector3 point = support.transform.InverseTransformPoint(world);
+            return new Vector2(point.x, point.z);
+        }
+
+        private static int ClipEdge(Span<Vector2> input, int count, Span<Vector2> output, int axis, float edge, int sign)
+        {
+            if (count == 0)
+            {
+                return 0;
+            }
+
+            int written = 0;
+            Vector2 previous = input[count - 1];
+            float from = (previous[axis] - edge) * sign;
+            for (int index = 0; index < count; index++)
+            {
+                Vector2 current = input[index];
+                float to = (current[axis] - edge) * sign;
+                if ((from < 0f) != (to < 0f))
+                {
+                    output[written++] = Vector2.LerpUnclamped(previous, current, from / (from - to));
+                }
+
+                if (to >= 0f)
+                {
+                    output[written++] = current;
+                }
+
+                previous = current;
+                from = to;
+            }
+
+            return written;
+        }
+
+        private static float PolygonArea(Span<Vector2> polygon, int count)
+        {
+            if (count < 3)
+            {
+                return 0f;
+            }
+
+            Vector2 origin = polygon[0];
+            float sum = 0f;
+            for (int index = 1; index < count - 1; index++)
+            {
+                Vector2 left = polygon[index] - origin;
+                Vector2 right = polygon[index + 1] - origin;
+                sum += left.x * right.y - left.y * right.x;
+            }
+
+            return Mathf.Abs(sum) * 0.5f;
         }
 
         private void GetPlacementShape(Collider collider, Quaternion rotation, out Vector3 center,
@@ -402,21 +506,63 @@ namespace Sporeborn.Runtime
                 Mathf.Abs(x.z) + Mathf.Abs(y.z) + Mathf.Abs(z.z));
         }
 
-        public void Drop(CharacterController player)
+        public void Drop(CharacterController player, Vector3 cameraPosition)
         {
+            Vector3 heldPosition = transform.position;
+            Quaternion rotation = transform.rotation;
             transform.SetParent(null, true);
+            if (!TryFindDropPosition(heldPosition, cameraPosition, rotation, out Vector3 releasePosition))
+            {
+                SetColliders(true);
+                Restore();
+                return;
+            }
+
+            transform.position = releasePosition;
             _state = State.Falling;
-            _body.position = transform.position;
+            _body.position = releasePosition;
             _body.rotation = transform.rotation;
             SetColliders(true);
             foreach (Collider itemCollider in _colliders)
             {
                 Physics.IgnoreCollision(itemCollider, player);
             }
+            _body.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
             _body.isKinematic = false;
             _body.linearVelocity = Vector3.zero;
             _body.angularVelocity = Vector3.zero;
             _body.WakeUp();
+        }
+
+        private bool TryFindDropPosition(Vector3 held, Vector3 cameraPosition, Quaternion rotation, out Vector3 release)
+        {
+            Bounds room = _roomBounds.bounds;
+            for (int step = 0; step <= 8; step++)
+            {
+                release = Vector3.Lerp(held, cameraPosition, step / 8f);
+                if (room.Contains(release) && !OverlapsSolid(release, rotation))
+                {
+                    return true;
+                }
+            }
+
+            release = default;
+            return false;
+        }
+
+        private bool OverlapsSolid(Vector3 position, Quaternion rotation)
+        {
+            foreach (Collider collider in _colliders)
+            {
+                GetPlacementShape(collider, rotation, out Vector3 center, out Vector3 half, out Quaternion orientation);
+                Vector3 inset = Vector3.Max(Vector3.one * 0.001f, half - Vector3.one * 0.003f);
+                if (Physics.CheckBox(position + center, inset, orientation, RoomLayerMask, QueryTriggerInteraction.Ignore))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         public void Store(Transform box, Vector3 position)

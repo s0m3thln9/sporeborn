@@ -7,6 +7,7 @@ namespace Sporeborn.Runtime
     {
         private TextMesh _text;
         private MeshRenderer _renderer;
+        private Material _depthMaterial;
         private Camera _view;
         private float _size;
         private Vector2 _limits;
@@ -37,6 +38,15 @@ namespace Sporeborn.Runtime
             _text.alignment = TextAlignment.Center;
             _text.fontSize = 32;
             _text.color = color;
+            Shader shader = Resources.Load<Shader>("WorkshopSignDepth");
+            if (shader != null)
+            {
+                _depthMaterial = new Material(shader);
+                _depthMaterial.mainTexture = _renderer.sharedMaterial.mainTexture;
+                _renderer.sharedMaterial = _depthMaterial;
+                Font.textureRebuilt += UpdateAtlas;
+            }
+
             _text.text = text;
             Fit();
             FaceViewer();
@@ -54,6 +64,23 @@ namespace Sporeborn.Runtime
         private void LateUpdate()
         {
             FaceViewer();
+        }
+
+        private void UpdateAtlas(Font font)
+        {
+            if (font == _text.font)
+            {
+                _depthMaterial.mainTexture = font.material.mainTexture;
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (_depthMaterial != null)
+            {
+                Font.textureRebuilt -= UpdateAtlas;
+                Destroy(_depthMaterial);
+            }
         }
 
         private void FaceViewer()

@@ -32,6 +32,7 @@ namespace Sporeborn.Runtime
         private Transform _placementMarker;
         private string _placementPrompt;
         private bool _placementBlocked;
+        private Texture2D _blockedReticle;
 
         public float WalkingMultiplier => _held != null && _held.Kind == Carryable.ItemKind.Box ? 0.82f : 1f;
 
@@ -70,7 +71,7 @@ namespace Sporeborn.Runtime
             }
         }
 
-        public void UpdateAim(bool interact, bool use, bool drop, float mixingSeconds = 0f)
+        public void UpdateAim(bool interact, bool use, bool drop, float mixingSeconds = 0f, float scrollSteps = 0f)
         {
             if (!isActiveAndEnabled || !_batch.isActiveAndEnabled || _batch.Growth == null)
             {
@@ -83,6 +84,7 @@ namespace Sporeborn.Runtime
             if (_held != null)
             {
                 UpdateHand(aim.origin);
+                _held.RotateForPlacement(scrollSteps);
                 if (drop)
                 {
                     _held.Drop(_player, aim.origin);
@@ -92,7 +94,7 @@ namespace Sporeborn.Runtime
                     return;
                 }
 
-                _placementPrompt = "G   Бросить";
+                _placementPrompt = "Колесо   Повернуть   ·   G   Бросить";
             }
 
             Carryable target = hitSomething && hit.rigidbody != null ? hit.rigidbody.GetComponent<Carryable>() : null;
@@ -458,14 +460,55 @@ namespace Sporeborn.Runtime
                 return;
             }
 
-            var background = new Color(0.05f, 0.06f, 0.07f, 0.92f);
-            var red = new Color(1f, 0.36f, 0.28f);
-            DrawSurface(new Rect(x - 8f, y - 8f, 16f, 16f), background);
-            for (int step = -3; step <= 3; step++)
+            if (_blockedReticle == null)
             {
-                float offset = step * 2f;
-                DrawSurface(new Rect(x + offset - 1f, y + offset - 1f, 2f, 2f), red);
-                DrawSurface(new Rect(x + offset - 1f, y - offset - 1f, 2f, 2f), red);
+                _blockedReticle = CreateBlockedReticle();
+            }
+
+            GUI.DrawTexture(new Rect(x - 8f, y - 8f, 16f, 16f), _blockedReticle);
+        }
+
+        private static Texture2D CreateBlockedReticle()
+        {
+            const int size = 64;
+            var pixels = new Color32[size * size];
+            var red = new Color(1f, 0.36f, 0.28f);
+            var outline = new Color(0.05f, 0.06f, 0.07f);
+            Vector2 diagonal = new Vector2(1f, 1f).normalized;
+            Vector2 otherDiagonal = new Vector2(-diagonal.x, diagonal.y);
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    Vector2 point = new Vector2(x + 0.5f, y + 0.5f) - Vector2.one * (size * 0.5f);
+                    float distance = Mathf.Min(StrokeDistance(point, diagonal), StrokeDistance(point, otherDiagonal));
+                    Color color = Color.Lerp(outline, red, Mathf.Clamp01(5.5f - distance));
+                    color.a = Mathf.Clamp01(9f - distance);
+                    pixels[y * size + x] = color;
+                }
+            }
+
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, true)
+            {
+                filterMode = FilterMode.Trilinear,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            texture.SetPixels32(pixels);
+            texture.Apply(true, true);
+            return texture;
+        }
+
+        private static float StrokeDistance(Vector2 point, Vector2 direction)
+        {
+            float projected = Mathf.Clamp(Vector2.Dot(point, direction), -24f, 24f);
+            return (point - direction * projected).magnitude;
+        }
+
+        private void OnDestroy()
+        {
+            if (_blockedReticle != null)
+            {
+                Destroy(_blockedReticle);
             }
         }
 

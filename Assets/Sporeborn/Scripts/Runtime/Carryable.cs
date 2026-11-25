@@ -9,6 +9,7 @@ namespace Sporeborn.Runtime
     public sealed class Carryable : MonoBehaviour
     {
         private const int RoomLayerMask = 1;
+        private const float DegreesPerScrollStep = 15f;
         private static readonly int ColorProperty = Shader.PropertyToID("_Color");
         private static readonly Color HighlightColor = new Color(1f, 0.9f, 0.76f);
 
@@ -22,6 +23,7 @@ namespace Sporeborn.Runtime
         private State _state;
         private Vector3 _lastReachablePosition;
         private Quaternion _lastReachableRotation;
+        private float _placementYawOffset;
 
         public BoxCollider RoomBounds => _roomBounds;
         public bool IsResting => _state == State.Available;
@@ -30,7 +32,7 @@ namespace Sporeborn.Runtime
         public float Radius { get; private set; } = 0.022f;
         public bool CanCut => NeedsCut && !_covered;
         internal bool NeedsCut => _state == State.Rooted;
-        internal Quaternion PlacementRotation => Quaternion.Euler(0f, _lastReachableRotation.eulerAngles.y, 0f);
+        internal Quaternion PlacementRotation => Quaternion.Euler(0f, _lastReachableRotation.eulerAngles.y + _placementYawOffset, 0f);
         private bool _covered;
         private Vector3 _cutLanding;
         public string Id { get; private set; }
@@ -154,8 +156,7 @@ namespace Sporeborn.Runtime
                 return false;
             }
 
-            _state = State.Held;
-            AttachTo(hand, Vector3.zero);
+            Hold(hand);
             return true;
         }
 
@@ -193,7 +194,7 @@ namespace Sporeborn.Runtime
                 location = location,
                 position = IsHeld ? Vector3.zero : cutting ? _cutLanding :
                     string.IsNullOrEmpty(parent) ? transform.position : transform.localPosition,
-                rotation = IsHeld ? Quaternion.identity :
+                rotation = IsHeld ? transform.localRotation :
                     string.IsNullOrEmpty(parent) ? transform.rotation : transform.localRotation,
                 recoveryPosition = _lastReachablePosition,
                 recoveryRotation = _lastReachableRotation
@@ -214,6 +215,7 @@ namespace Sporeborn.Runtime
                 ItemLocation.Rooted => State.Rooted,
                 _ => State.Available
             };
+            _placementYawOffset = IsHeld ? save.rotation.eulerAngles.y : 0f;
             transform.localScale = pins ? Vector3.one * 0.32f : Vector3.one;
             _covered = pins;
             SetColliders(!pins && save.location != ItemLocation.Falling &&
@@ -316,11 +318,28 @@ namespace Sporeborn.Runtime
                 _lastReachableRotation = transform.rotation;
             }
 
+            Hold(hand);
+            return true;
+        }
+
+        private void Hold(Transform hand)
+        {
+            _placementYawOffset = 0f;
             _state = State.Held;
             _body.isKinematic = true;
             SetColliders(false);
             AttachTo(hand, Vector3.zero);
-            return true;
+        }
+
+        internal void RotateForPlacement(float scrollSteps)
+        {
+            if (!IsHeld || scrollSteps == 0f || !float.IsFinite(scrollSteps))
+            {
+                return;
+            }
+
+            _placementYawOffset = Mathf.Repeat(_placementYawOffset + scrollSteps * DegreesPerScrollStep, 360f);
+            transform.localRotation = Quaternion.Euler(0f, _placementYawOffset, 0f);
         }
 
         internal bool TryGetPlacement(RaycastHit surface, Quaternion rotation, out Vector3 position, out Bounds footprint)

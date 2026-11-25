@@ -791,7 +791,7 @@ namespace Sporeborn.Runtime
         }
 
         private string DeviceStatus(Station station) => _cycle.IsWorking(station)
-            ? $"{Stations[(int)station]} · лоток №{_cycle.LoadedTray(station).Number}"
+            ? null
             : $"{Stations[(int)station]} · {DeviceReading(station)}";
 
         private string DeviceReading(Station station)

@@ -140,7 +140,7 @@ namespace Sporeborn.Runtime
                 return false;
             }
 
-            box.Item.Place(position);
+            box.Item.Place(position, box.Item.PlacementRotation);
             notice = $"{box.WeightGrams} г   ·   Цена: {box.Price}";
             Sounds.Play(WorkshopSounds.Cue.Pack);
             return true;
@@ -289,7 +289,7 @@ namespace Sporeborn.Runtime
                 return false;
             }
 
-            box.Item.Place(position);
+            box.Item.Place(position, box.Item.PlacementRotation);
             notice = refusal;
             return true;
         }

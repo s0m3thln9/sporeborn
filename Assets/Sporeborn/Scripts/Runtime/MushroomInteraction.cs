@@ -31,8 +31,7 @@ namespace Sporeborn.Runtime
         private GUIStyle _actionStyle;
         private Transform _placementMarker;
         private string _placementPrompt;
-        private bool _placing;
-        private bool _validPlacement;
+        private bool _placementBlocked;
 
         public float WalkingMultiplier => _held != null && _held.Kind == Carryable.ItemKind.Box ? 0.82f : 1f;
 
@@ -64,8 +63,7 @@ namespace Sporeborn.Runtime
             _prompt = null;
             _detail = null;
             _placementPrompt = null;
-            _placing = false;
-            _validPlacement = false;
+            _placementBlocked = false;
             if (_placementMarker != null && _placementMarker.gameObject.activeSelf)
             {
                 _placementMarker.gameObject.SetActive(false);
@@ -195,7 +193,7 @@ namespace Sporeborn.Runtime
         private void TryPlaceOnSurface(RaycastHit hit, bool use)
         {
             bool aimedAtSurface = hit.collider != null && hit.normal.y >= 0.85f;
-            var rotation = Quaternion.Euler(0f, transform.eulerAngles.y, 0f);
+            Quaternion rotation = _held.PlacementRotation;
             Vector3 position = default;
             Bounds footprint = default;
             bool canPlace = aimedAtSurface && _held.TryGetPlacement(hit, rotation, out position, out footprint);
@@ -275,8 +273,7 @@ namespace Sporeborn.Runtime
 
         private void SetPlacementPreview(Vector3 surface, Quaternion rotation, Bounds footprint, bool aimedAtSurface, bool canPlace)
         {
-            _placing = aimedAtSurface;
-            _validPlacement = canPlace;
+            _placementBlocked = aimedAtSurface && !canPlace;
             if (canPlace)
             {
                 if (_placementMarker == null)
@@ -455,35 +452,21 @@ namespace Sporeborn.Runtime
 
         private void DrawReticle(float x, float y)
         {
-            DrawSurface(new Rect(x - 2f, y - 2f, 4f, 4f), Color.white);
-            if (!_placing)
+            if (!_placementBlocked)
             {
+                DrawSurface(new Rect(x - 2f, y - 2f, 4f, 4f), Color.white);
                 return;
             }
 
-            if (_validPlacement)
+            var background = new Color(0.05f, 0.06f, 0.07f, 0.92f);
+            var red = new Color(1f, 0.36f, 0.28f);
+            DrawSurface(new Rect(x - 8f, y - 8f, 16f, 16f), background);
+            for (int step = -3; step <= 3; step++)
             {
-                var color = new Color(0.31f, 1f, 0.64f);
-                DrawStroke(new Vector2(x, y - 21f), new Vector2(x, y - 7f), color);
-                DrawStroke(new Vector2(x - 6f, y - 13f), new Vector2(x, y - 7f), color);
-                DrawStroke(new Vector2(x + 6f, y - 13f), new Vector2(x, y - 7f), color);
+                float offset = step * 2f;
+                DrawSurface(new Rect(x + offset - 1f, y + offset - 1f, 2f, 2f), red);
+                DrawSurface(new Rect(x + offset - 1f, y - offset - 1f, 2f, 2f), red);
             }
-            else
-            {
-                var color = new Color(1f, 0.55f, 0.42f);
-                DrawStroke(new Vector2(x - 5f, y - 22f), new Vector2(x + 5f, y - 12f), color);
-                DrawStroke(new Vector2(x + 5f, y - 22f), new Vector2(x - 5f, y - 12f), color);
-            }
-        }
-
-        private static void DrawStroke(Vector2 from, Vector2 to, Color color)
-        {
-            Vector2 delta = to - from;
-            Matrix4x4 previous = GUI.matrix;
-            GUIUtility.RotateAroundPivot(Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg, from);
-            DrawSurface(new Rect(from.x - 1f, from.y - 2.5f, delta.magnitude + 2f, 5f), new Color(0.04f, 0.08f, 0.08f));
-            DrawSurface(new Rect(from.x, from.y - 1f, delta.magnitude, 2f), color);
-            GUI.matrix = previous;
         }
 
         private static void DrawSurface(Rect rect, Color color)

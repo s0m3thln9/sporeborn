@@ -8,7 +8,6 @@ namespace Sporeborn.Runtime
 {
     public sealed class WorkshopGrowth
     {
-        private const int MushroomCount = 12;
         private static readonly string[] Portions = { "Основа", "Солома", "Премикс", "Вода", "Мицелий" };
         private static readonly string[] Stations = { "Обработка", "Инкубатор", "Камера роста" };
         private static readonly Color Soil = new Color(0.25f, 0.16f, 0.08f);
@@ -23,22 +22,33 @@ namespace Sporeborn.Runtime
         private readonly WorkshopSign[] _deviceDisplays = new WorkshopSign[3];
         private readonly WorkshopSounds _sounds;
         private readonly Transform[] _docks = new Transform[3];
-        private readonly Carryable[] _crop = new Carryable[MushroomCount];
         private readonly Carryable _template;
         private readonly Transform _room;
         private readonly BoxCollider _bounds;
         private readonly Material _material;
-        private readonly Carryable _tray;
-        private readonly Carryable _lid;
+        private readonly GrowingTray[] _trays = new GrowingTray[GrowthCycle.MaxTrays];
         private readonly GameObject _mixture;
-        private readonly GameObject _substrate;
         private readonly Collider _waste;
         private readonly Transform _jarLid;
         private Portion? _scoop;
         private bool _cupFull;
         private bool _cultureLoaded;
-        private bool _cropCovered;
-        private int _cropNumber = 1;
+
+        private sealed class GrowingTray
+        {
+            public GrowthCycle.Tray State;
+            public Carryable Item;
+            public Carryable Lid;
+            public GameObject Substrate;
+            public bool? CropCovered;
+            public readonly Carryable[] Crop = new Carryable[GrowthCycle.MushroomCount];
+
+            public int Number => State.Number;
+            public string Name => $"Лоток №{Number}";
+            public bool HasUncutMushrooms => System.Array.Exists(Crop, mushroom => mushroom != null && mushroom.NeedsCut);
+            public bool HasMushroomsOnPlatform => System.Array.Exists(Crop,
+                mushroom => mushroom != null && mushroom.transform.parent == Item.transform);
+        }
 
         public WorkshopGrowth(Transform room, Carryable template, Material material, BoxCollider bounds, Vector3 platform, WorkshopSounds sounds)
         {
@@ -82,11 +92,7 @@ namespace Sporeborn.Runtime
             _mixture = Surface("Mixture", bowl.transform, Vector3.up * 0.039f, new Vector3(0.24f, 0.012f, 0.22f));
 
             Vector3 trayPosition = platform + new Vector3(0f, -0.022f, 0.11f);
-            _tray = MakeTray(trayPosition);
-            _substrate = Surface("Substrate", _tray.transform, new Vector3(0f, 0.046f, 0.11f),
-                new Vector3(0.36f, 0.027f, 0.26f));
-            _lid = MakeItem(Kind.Lid, new Vector3(-0.75f, 0.915f, 0.95f), new Vector3(0.41f, 0.025f, 0.31f),
-                new Color(0.60f, 0.64f, 0.68f));
+            BuildTrayPair(_cycle.TrayAt(1), trayPosition, new Vector3(-0.75f, 0.915f, 0.95f));
             _waste = Block("Disposal", room, new Vector3(-2.04f, 0.37f, 1.16f),
                 new Vector3(0.48f, 0.74f, 0.40f), new Color(0.32f, 0.29f, 0.28f)).GetComponent<Collider>();
             WorkshopBatch.AddFrontText(room, new Vector3(-2.04f, 0.66f, 0.958f),
@@ -99,81 +105,182 @@ namespace Sporeborn.Runtime
 
         public void Tick(float seconds)
         {
-            TrayStage before = _cycle.Stage;
+            TrayStage firstStage = _trays[0].State.Stage;
+            TrayStage? secondStage = _trays[1]?.State.Stage;
             _cycle.Tick(seconds);
-            if (before != _cycle.Stage)
+            UpdateTrayAfterTick(_trays[0], firstStage);
+            if (secondStage.HasValue)
             {
-                RefreshTray();
-                _sounds.Play(WorkshopSounds.Cue.Finished);
+                UpdateTrayAfterTick(_trays[1], secondStage.Value);
             }
 
             UpdateDeviceDisplays();
-
             RefreshCropAccess();
+        }
+
+        private void UpdateTrayAfterTick(GrowingTray tray, TrayStage before)
+        {
+            if (before != tray.State.Stage)
+            {
+                RefreshTray(tray);
+                _sounds.Play(WorkshopSounds.Cue.Finished);
+            }
         }
 
         internal void RefreshCropAccess()
         {
-            bool covered = !_tray.IsResting || _cycle.LidClosed || _cycle.Dock.HasValue || _cycle.Stage != TrayStage.Harvest;
-            if (_cropCovered == covered)
+            foreach (GrowingTray tray in _trays)
             {
-                return;
-            }
-
-            _cropCovered = covered;
-            foreach (Carryable mushroom in _crop)
-            {
-                if (mushroom != null && mushroom.transform.parent == _tray.transform)
+                if (tray == null || tray.State.Crop == 0)
                 {
-                    mushroom.SetCovered(covered);
+                    continue;
+                }
+
+                bool covered = !tray.Item.IsResting || tray.State.LidClosed || tray.State.Stage != TrayStage.Harvest;
+                if (tray.CropCovered == covered)
+                {
+                    continue;
+                }
+
+                tray.CropCovered = covered;
+                foreach (Carryable mushroom in tray.Crop)
+                {
+                    if (mushroom != null && mushroom.transform.parent == tray.Item.transform)
+                    {
+                        mushroom.SetCovered(covered);
+                    }
                 }
             }
         }
 
-        internal bool HarvestReady => _cycle.Stage == TrayStage.Harvest && !_cycle.Dock.HasValue;
         internal bool CanRestock => _cycle.CanRestock;
         internal bool TryRestock() => _cycle.TryRestock();
-        internal bool HasUncutMushrooms => System.Array.Exists(_crop, mushroom => mushroom != null && mushroom.NeedsCut);
-        internal bool HasMushroomsOnPlatform => System.Array.Exists(_crop,
-            mushroom => mushroom != null && mushroom.transform.parent == _tray.transform);
+        internal bool HasSecondTray => _cycle.TrayAt(2) != null;
+        internal bool HasUncutMushrooms(int number) => _trays[number - 1].HasUncutMushrooms;
+        internal bool HasMushroomsOnPlatform(int number) => _trays[number - 1].HasMushroomsOnPlatform;
 
-        internal string NextStep(Carryable held)
+        internal bool TryAddSecondTray(Vector3 position)
         {
-            if (_cycle.Dock is Station station)
+            GrowthCycle.Tray tray = _cycle.TryAddSecondTray();
+            if (tray == null)
+            {
+                return false;
+            }
+
+            BuildTrayPair(tray, position, position + LidPosition);
+            return true;
+        }
+
+        internal static string TrayId(int number) => number == 1 ? "Tray" : $"tray/{number}";
+        internal static string LidId(int number) => number == 1 ? "Lid" : $"lid/{number}";
+        private static string DockId(Station station) => $"dock/{(int)station}";
+
+        internal string DockIdFor(Carryable item)
+        {
+            GrowingTray tray = FindTray(item);
+            return tray != null && _cycle.DockOf(tray.State) is Station station ? DockId(station) : null;
+        }
+
+        internal Transform ResolveDock(Carryable item)
+        {
+            if (item.Kind != Kind.Tray)
+            {
+                return null;
+            }
+
+            GrowingTray tray = FindTray(item);
+            return tray != null && _cycle.DockOf(tray.State) is Station station ? _docks[(int)station] : null;
+        }
+
+        internal string TimerReading(Station station) => _cycle.IsWorking(station)
+            ? $"{Stations[(int)station]} · лоток №{_cycle.LoadedTray(station).Number} · {Mathf.CeilToInt(_cycle.Remaining(station))} с"
+            : null;
+
+        internal string NextStep(Carryable held, Carryable aimed, out int harvestTray)
+        {
+            harvestTray = 0;
+            GrowingTray tray = FindTray(held) ?? FindTray(aimed) ?? FocusTray();
+            if (_cycle.DockOf(tray.State) is Station station)
             {
                 string device = Stations[(int)station];
                 if (_cycle.IsWorking(station))
                 {
-                    string wait = $"{device} · осталось {Mathf.CeilToInt(_cycle.Remaining)} с.";
                     return station == Station.Incubation
-                        ? $"{wait} Поднесите открытую коробку и напечатайте этикетку."
-                        : wait;
+                        ? $"{tray.Name} · Поднесите открытую коробку и напечатайте этикетку."
+                        : $"{tray.Name} · Дождитесь окончания работы.";
                 }
 
                 if (_cycle.IsDone(station))
                 {
-                    return _cycle.IsOpen(station) ? $"{device} · выньте лоток на полке."
-                        : $"{device} · готово. Откройте дверцу.";
+                    return _cycle.IsOpen(station) ? $"{tray.Name} · выньте лоток с полки."
+                        : $"{device} · откройте дверцу лотка №{tray.Number}.";
                 }
 
                 return _cycle.IsOpen(station) ? $"{device} · закройте дверцу."
                     : $"{device} · нажмите зелёную кнопку.";
             }
 
-            return _cycle.Stage switch
+            string next = tray.State.Stage switch
             {
-                TrayStage.Empty => PreparationStep(held),
-                TrayStage.Mixed => LoadStep(Station.Treatment, true, held),
-                TrayStage.Treated => CultureStep(held),
-                TrayStage.Inoculated => LoadStep(Station.Incubation, true, held),
-                TrayStage.Colonized => LoadStep(Station.Fruiting, false, held),
-                TrayStage.Harvest when _cycle.LidClosed => LidStep(false, held),
-                TrayStage.Harvest when held == _tray => "Поставьте лоток на стол.",
+                TrayStage.Empty => PreparationStep(tray, held),
+                TrayStage.Mixed => LoadStep(tray, Station.Treatment, true, held),
+                TrayStage.Treated => CultureStep(tray, held),
+                TrayStage.Inoculated => LoadStep(tray, Station.Incubation, true, held),
+                TrayStage.Colonized => LoadStep(tray, Station.Fruiting, false, held),
+                TrayStage.Harvest when tray.State.LidClosed => LidStep(tray, false, held),
+                TrayStage.Harvest when !tray.Item.IsResting && tray.HasMushroomsOnPlatform => "Поставьте лоток на стол.",
                 _ => null
             };
+            if (next == null)
+            {
+                harvestTray = tray.Number;
+                return null;
+            }
+
+            return $"{tray.Name} · {next}";
         }
 
-        private string PreparationStep(Carryable held)
+        private GrowingTray FocusTray()
+        {
+            GrowingTray best = _trays[0];
+            if (_trays[1] != null && StepPriority(_trays[1]) > StepPriority(best))
+            {
+                best = _trays[1];
+            }
+
+            return best;
+        }
+
+        private int StepPriority(GrowingTray tray)
+        {
+            if (_cycle.DockOf(tray.State) is Station station)
+            {
+                return _cycle.IsWorking(station) ? 0 : 3;
+            }
+
+            return tray.State.Stage == TrayStage.Empty ? 1 : 2;
+        }
+
+        private GrowingTray FindTray(Carryable item)
+        {
+            if (item == null)
+            {
+                return null;
+            }
+
+            foreach (GrowingTray tray in _trays)
+            {
+                if (tray != null && (item == tray.Item || item == tray.Lid ||
+                    (item.Kind == Kind.Mushroom && item.transform.parent == tray.Item.transform)))
+                {
+                    return tray;
+                }
+            }
+
+            return null;
+        }
+
+        private string PreparationStep(GrowingTray tray, Carryable held)
         {
             if (_cycle.Stock(Portion.Base) < 4 - _cycle.Count(Portion.Base) ||
                 _cycle.Stock(Portion.Straw) < 1 - _cycle.Count(Portion.Straw) ||
@@ -184,9 +291,9 @@ namespace Sporeborn.Runtime
                 return "Запасов для новой партии не хватает. Комплект материалов можно купить на стенде.";
             }
 
-            if (_cycle.LidClosed)
+            if (tray.State.LidClosed)
             {
-                return LidStep(false, held);
+                return LidStep(tray, false, held);
             }
 
             if (_cycle.MixReady)
@@ -207,11 +314,11 @@ namespace Sporeborn.Runtime
             return "Возьмите мешалку и двигайте мышью над ёмкостью «СМЕСЬ» 5 секунд.";
         }
 
-        private string CultureStep(Carryable held)
+        private string CultureStep(GrowingTray tray, Carryable held)
         {
-            if (_cycle.LidClosed)
+            if (tray.State.LidClosed)
             {
-                return LidStep(false, held);
+                return LidStep(tray, false, held);
             }
 
             if (!_cycle.JarOpen && !_cultureLoaded)
@@ -223,26 +330,31 @@ namespace Sporeborn.Runtime
                 : "Возьмите мерку и наберите мицелий из банки.";
         }
 
-        private string LoadStep(Station station, bool needsLid, Carryable held)
+        private string LoadStep(GrowingTray tray, Station station, bool needsLid, Carryable held)
         {
-            if (_cycle.LidClosed != needsLid)
+            if (tray.State.LidClosed != needsLid)
             {
-                return LidStep(needsLid, held);
+                return LidStep(tray, needsLid, held);
             }
 
             string device = Stations[(int)station];
+            if (_cycle.LoadedTray(station) is GrowthCycle.Tray loaded)
+            {
+                return $"{device} · сначала выньте лоток №{loaded.Number}.";
+            }
+
             if (!_cycle.IsOpen(station))
             {
-                return held == _tray ? $"Поставьте лоток и откройте дверцу. Дальше · {device}."
+                return held == tray.Item ? $"Поставьте лоток и откройте дверцу. Дальше · {device}."
                     : $"{device} · откройте дверцу.";
             }
 
             return $"{device} · возьмите лоток и загрузите его на полке.";
         }
 
-        private string LidStep(bool close, Carryable held)
+        private string LidStep(GrowingTray tray, bool close, Carryable held)
         {
-            if (held == _tray)
+            if (held == tray.Item)
             {
                 return "Поставьте лоток, чтобы получить доступ к крышке.";
             }
@@ -253,13 +365,14 @@ namespace Sporeborn.Runtime
 
         public bool TryCut(Carryable mushroom)
         {
-            if (_cycle.Stage != TrayStage.Harvest || _cycle.Dock.HasValue || _cycle.LidClosed ||
-                mushroom.transform.parent != _tray.transform)
+            GrowingTray tray = FindTray(mushroom);
+            if (tray == null || tray.State.Stage != TrayStage.Harvest || _cycle.DockOf(tray.State).HasValue ||
+                tray.State.LidClosed)
             {
                 return false;
             }
 
-            int index = System.Array.IndexOf(_crop, mushroom);
+            int index = System.Array.IndexOf(tray.Crop, mushroom);
             return index >= 0 && mushroom.TryCut(MushroomOffset(index) + new Vector3(0f, -0.048f, -0.255f));
         }
 
@@ -285,31 +398,39 @@ namespace Sporeborn.Runtime
                 detail = $"Основа {_cycle.Count(Portion.Base)}/4 · Солома {_cycle.Count(Portion.Straw)}/1 · Премикс {_cycle.Count(Portion.Premix)}/1 · Вода {_cycle.Count(Portion.Water)}/2";
                 prompt = AimAtBowl(held, click && nearTool, nearTool ? mixingSeconds : 0f);
             }
-            else if (target == _tray)
+            else if (FindTray(target) is GrowingTray tray)
             {
-                if (_cycle.Dock == null)
+                if (target == tray.Lid)
                 {
-                    detail = TrayStatus();
-                    prompt = AimAtTray(hand, ref held, click && (held == null || nearTool));
+                    detail = $"Крышка лотка №{tray.Number}";
                 }
-                else if (held == null)
+                else if (_cycle.DockOf(tray.State) is Station dock)
                 {
-                    prompt = DevicePrompt(_cycle.Dock.Value, false, false, hand, ref held, click);
+                    detail = DeviceStatus(dock);
+                    prompt = DevicePrompt(dock, false, false, hand, ref held, click);
+                }
+                else
+                {
+                    detail = TrayStatus(tray);
+                    if (target == tray.Item)
+                    {
+                        prompt = AimAtTray(tray, hand, ref held, click && (held == null || nearTool));
+                    }
                 }
             }
             else if (_doors.TryGetValue(collider, out Station station))
             {
-                detail = _cycle.Dock == station ? null : DeviceStatus(station);
+                detail = DeviceStatus(station);
                 prompt = DevicePrompt(station, true, false, hand, ref held, click);
             }
             else if (_slots.TryGetValue(collider, out station))
             {
-                detail = _cycle.Dock == station ? null : DeviceStatus(station);
+                detail = DeviceStatus(station);
                 prompt = DevicePrompt(station, false, false, hand, ref held, click);
             }
             else if (_starts.TryGetValue(collider, out station))
             {
-                detail = _cycle.Dock == station ? null : DeviceStatus(station);
+                detail = DeviceStatus(station);
                 prompt = DevicePrompt(station, false, true, hand, ref held, click);
             }
             else if (collider == _waste)
@@ -463,13 +584,13 @@ namespace Sporeborn.Runtime
             }
         }
 
-        private string AimAtTray(Transform hand, ref Carryable held, bool click)
+        private string AimAtTray(GrowingTray tray, Transform hand, ref Carryable held, bool click)
         {
-            if (held == null && _cycle.LidClosed)
+            if (held == null && tray.State.LidClosed)
             {
-                if (click && _cycle.TrySetLid(false) && _lid.TakeFromFixture(hand))
+                if (click && _cycle.TrySetLid(tray.State, false) && tray.Lid.TakeFromFixture(hand))
                 {
-                    held = _lid;
+                    held = tray.Lid;
                 }
 
                 return "ЛКМ   Снять крышку";
@@ -483,39 +604,44 @@ namespace Sporeborn.Runtime
             switch (held.Kind)
             {
                 case Kind.Lid:
-                    if (click && _cycle.TrySetLid(true))
+                    if (held != tray.Lid)
                     {
-                        _lid.Store(_tray.transform, LidPosition);
+                        return $"Нужна крышка для лотка №{tray.Number}";
+                    }
+
+                    if (click && _cycle.TrySetLid(tray.State, true))
+                    {
+                        tray.Lid.Store(tray.Item.transform, LidPosition);
                         held = null;
                     }
 
-                    return "ЛКМ   Закрыть лоток";
+                    return tray.State.LidClosed ? "Лоток уже закрыт" : "ЛКМ   Закрыть лоток";
                 case Kind.Bowl:
-                    if (_cycle.LidClosed || _cycle.Stage != TrayStage.Empty || !_cycle.MixReady)
+                    if (tray.State.LidClosed || tray.State.Stage != TrayStage.Empty || !_cycle.MixReady)
                     {
-                        return _cycle.LidClosed ? "Снимите крышку" : _cycle.Stage != TrayStage.Empty
+                        return tray.State.LidClosed ? "Снимите крышку" : tray.State.Stage != TrayStage.Empty
                             ? "Лоток уже заполнен" : "Смесь ещё не готова";
                     }
 
-                    if (click && _cycle.TryFillTray())
+                    if (click && _cycle.TryFillTray(tray.State))
                     {
                         RefreshMix();
-                        RefreshTray();
+                        RefreshTray(tray);
                         _sounds.Play(WorkshopSounds.Cue.Portion);
                     }
 
                     return "ЛКМ   Переложить смесь";
                 case Kind.Inoculator:
-                    if (!_cultureLoaded || _cycle.LidClosed || _cycle.Stage != TrayStage.Treated)
+                    if (!_cultureLoaded || tray.State.LidClosed || tray.State.Stage != TrayStage.Treated)
                     {
-                        return !_cultureLoaded ? "Наберите мицелий" : _cycle.LidClosed
+                        return !_cultureLoaded ? "Наберите мицелий" : tray.State.LidClosed
                             ? "Снимите крышку" : "Нужен обработанный субстрат";
                     }
 
-                    if (click && _cycle.TryInoculate())
+                    if (click && _cycle.TryInoculate(tray.State))
                     {
                         _cultureLoaded = false;
-                        RefreshTray();
+                        RefreshTray(tray);
                         _sounds.Play(WorkshopSounds.Cue.Portion);
                     }
 
@@ -527,40 +653,48 @@ namespace Sporeborn.Runtime
 
         private string DevicePrompt(Station station, bool door, bool start, Transform hand, ref Carryable held, bool click)
         {
+            GrowthCycle.Tray loaded = _cycle.LoadedTray(station);
             if (_cycle.IsWorking(station))
             {
-                return "Устройство работает · дверца заблокирована";
+                return $"Лоток №{loaded.Number} в работе · дверца заблокирована";
             }
 
-            if (held != null && held != _tray)
+            GrowingTray carrying = FindTray(held);
+            bool carryingTray = carrying != null && held == carrying.Item;
+            if (held != null && !carryingTray)
             {
                 return "Освободите руки";
             }
 
             if (start)
             {
-                if (_cycle.Dock != station || _cycle.IsOpen(station) || !_cycle.HasCorrectTray(station))
+                if (loaded == null || _cycle.IsOpen(station) || !_cycle.HasCorrectTray(station, loaded))
                 {
                     return _cycle.IsDone(station) ? "Готово · откройте дверцу" : "Для запуска загрузите лоток и закройте дверцу";
                 }
 
                 if (click && _cycle.TryStart(station))
                 {
-                    RefreshTray();
+                    RefreshTray(_trays[loaded.Number - 1]);
                     _sounds.Play(WorkshopSounds.Cue.Start);
                 }
 
                 return "ЛКМ   Старт";
             }
 
-            if (held == _tray)
+            if (carryingTray)
             {
+                if (loaded != null)
+                {
+                    return $"Устройство занято · лоток №{loaded.Number}";
+                }
+
                 if (!_cycle.IsOpen(station))
                 {
                     return "Поставьте лоток и откройте дверцу";
                 }
 
-                if (!_cycle.HasCorrectTray(station))
+                if (!_cycle.HasCorrectTray(station, carrying.State))
                 {
                     return station switch
                     {
@@ -570,23 +704,24 @@ namespace Sporeborn.Runtime
                     };
                 }
 
-                if (click && _cycle.TryLoad(station))
+                if (click && _cycle.TryLoad(station, carrying.State))
                 {
-                    _tray.Store(_docks[(int)station], Vector3.zero);
+                    carrying.Item.Store(_docks[(int)station], Vector3.zero);
                     held = null;
                 }
 
-                return "ЛКМ   Загрузить лоток";
+                return $"ЛКМ   Загрузить лоток №{carrying.Number}";
             }
 
-            if (_cycle.IsOpen(station) && _cycle.Dock == station && !door)
+            if (_cycle.IsOpen(station) && loaded != null && !door)
             {
-                if (click && _cycle.TryUnload(station) && _tray.TakeFromFixture(hand))
+                GrowingTray tray = _trays[loaded.Number - 1];
+                if (click && _cycle.TryUnload(station) && tray.Item.TakeFromFixture(hand))
                 {
-                    held = _tray;
+                    held = tray.Item;
                 }
 
-                return "ЛКМ   Вынуть лоток";
+                return $"ЛКМ   Вынуть лоток №{loaded.Number}";
             }
 
             if (click && _cycle.TryToggleDoor(station))
@@ -615,39 +750,36 @@ namespace Sporeborn.Runtime
                 return "ЛКМ   Утилизировать смесь";
             }
 
-            if (held != _tray)
+            if (held.Kind != Kind.Tray)
             {
                 return null;
             }
 
-            foreach (Carryable mushroom in _crop)
+            GrowingTray tray = FindTray(held);
+            if (tray.HasMushroomsOnPlatform)
             {
-                if (mushroom != null && mushroom.transform.parent == _tray.transform)
-                {
-                    return "Срежьте и уберите все грибы с площадки";
-                }
+                return "Срежьте и уберите все грибы с площадки";
             }
 
-            if (_cycle.Stage != TrayStage.Harvest || _cycle.LidClosed)
+            if (tray.State.Stage != TrayStage.Harvest || tray.State.LidClosed)
             {
                 return "Нужен открытый лоток с отработанным субстратом";
             }
 
-            if (click && _cycle.TryDiscardTray())
+            if (click && _cycle.TryDiscardTray(tray.State))
             {
-                System.Array.Clear(_crop, 0, _crop.Length);
-                _cropNumber++;
-                RefreshTray();
+                System.Array.Clear(tray.Crop, 0, tray.Crop.Length);
+                RefreshTray(tray);
             }
 
-            return "ЛКМ   Утилизировать субстрат";
+            return $"ЛКМ   Утилизировать субстрат · лоток №{tray.Number}";
         }
 
-        private string TrayStatus()
+        private static string TrayStatus(GrowingTray tray)
         {
-            string state = _cycle.Stage switch
+            string state = tray.State.Stage switch
             {
-                TrayStage.Empty => "Лоток пуст",
+                TrayStage.Empty => "Пустой",
                 TrayStage.Mixed => "Смесь загружена",
                 TrayStage.Treated => "Субстрат обработан",
                 TrayStage.Inoculated => "Мицелий внесён",
@@ -655,13 +787,25 @@ namespace Sporeborn.Runtime
                 TrayStage.Fruiting => "Плодоношение",
                 _ => "Готово к сбору"
             };
-            return _cycle.LidClosed ? $"{state} · Крышка закрыта" : state;
+            return tray.State.LidClosed ? $"{tray.Name} · {state} · крышка закрыта" : $"{tray.Name} · {state}";
         }
 
-        private string DeviceStatus(Station station) => $"{Stations[(int)station]} · {DeviceReading(station)}";
+        private string DeviceStatus(Station station) => _cycle.IsWorking(station)
+            ? $"{Stations[(int)station]} · лоток №{_cycle.LoadedTray(station).Number}"
+            : $"{Stations[(int)station]} · {DeviceReading(station)}";
 
-        private string DeviceReading(Station station) => _cycle.IsWorking(station) ? $"{Mathf.CeilToInt(_cycle.Remaining)} с"
-            : _cycle.Dock != station ? "Пусто" : _cycle.IsDone(station) ? "Готово" : "Лоток загружен";
+        private string DeviceReading(Station station)
+        {
+            GrowthCycle.Tray tray = _cycle.LoadedTray(station);
+            if (tray == null)
+            {
+                return "Пусто";
+            }
+
+            string status = _cycle.IsWorking(station) ? $"{Mathf.CeilToInt(_cycle.Remaining(station))} с"
+                : _cycle.IsDone(station) ? "Готово" : "Загружен";
+            return $"№{tray.Number} · {status}";
+        }
 
         private void UpdateDeviceDisplays()
         {
@@ -681,43 +825,48 @@ namespace Sporeborn.Runtime
             Tint(_mixture, _cycle.MixReady ? new Color(0.36f, 0.26f, 0.14f) : Soil);
         }
 
-        private void RefreshTray(bool spawnMushrooms = true)
+        private void RefreshTray(GrowingTray tray, bool spawnMushrooms = true)
         {
-            _substrate.SetActive(_cycle.Stage != TrayStage.Empty);
-            Tint(_substrate, _cycle.Stage >= TrayStage.Colonized ? new Color(0.72f, 0.70f, 0.59f)
-                : _cycle.Stage == TrayStage.Inoculated ? new Color(0.49f, 0.40f, 0.27f) : Soil);
-            if (spawnMushrooms && (_cycle.Stage == TrayStage.Fruiting || _cycle.Stage == TrayStage.Harvest))
+            TrayStage stage = tray.State.Stage;
+            tray.Substrate.SetActive(stage != TrayStage.Empty);
+            Tint(tray.Substrate, stage >= TrayStage.Colonized ? new Color(0.72f, 0.70f, 0.59f)
+                : stage == TrayStage.Inoculated ? new Color(0.49f, 0.40f, 0.27f) : Soil);
+            if (spawnMushrooms && (stage == TrayStage.Fruiting || stage == TrayStage.Harvest))
             {
-                bool ripe = _cycle.Stage == TrayStage.Harvest;
-                for (int index = 0; index < _crop.Length; index++)
+                bool ripe = stage == TrayStage.Harvest;
+                for (int index = 0; index < tray.Crop.Length; index++)
                 {
-                    if (_crop[index] == null)
+                    if (tray.Crop[index] == null)
                     {
-                        _crop[index] = MakeMushroom($"mushroom/{_cropNumber}/{index + 1}", index);
+                        tray.Crop[index] = MakeMushroom(tray, $"mushroom/{tray.State.Crop}/{index + 1}", index);
                     }
 
-                    _crop[index].GrowOn(_tray.transform, MushroomOffset(index), ripe);
-                    _crop[index].SetCovered(true);
+                    tray.Crop[index].GrowOn(tray.Item.transform, MushroomOffset(index), ripe);
+                    tray.Crop[index].SetCovered(true);
                 }
             }
         }
 
         internal void Capture(WorkshopSave save)
         {
-            save.growth = _cycle.Capture();
+            save.workshopGrowth = _cycle.Capture();
             save.scoop = _scoop.HasValue ? (int)_scoop.Value : -1;
             save.cupFull = _cupFull;
             save.cultureLoaded = _cultureLoaded;
-            save.cropNumber = _cropNumber;
         }
 
-        internal void Restore(WorkshopSave save)
+        internal void Restore(WorkshopSave save, GrowthCycle.Snapshot growth, Vector3 secondTrayPosition)
         {
-            _cycle.TryRestore(save.growth);
+            _cycle.TryRestore(growth);
+            _trays[0].State = _cycle.TrayAt(1);
+            if (_cycle.TrayAt(2) is GrowthCycle.Tray second)
+            {
+                BuildTrayPair(second, secondTrayPosition, secondTrayPosition + LidPosition);
+            }
+
             _scoop = save.scoop < 0 ? null : (Portion)save.scoop;
             _cupFull = save.cupFull;
             _cultureLoaded = save.cultureLoaded;
-            _cropNumber = save.cropNumber;
             _jarLid.localPosition = new Vector3(-2.19f, 1.048f, _cycle.JarOpen ? 0.535f : 0.4f);
             for (int index = 0; index < _doorPanels.Length; index++)
             {
@@ -725,32 +874,58 @@ namespace Sporeborn.Runtime
             }
 
             RefreshMix();
-            RefreshTray(false);
+            foreach (GrowingTray tray in _trays)
+            {
+                if (tray != null)
+                {
+                    RefreshTray(tray, false);
+                }
+            }
+
             UpdateDeviceDisplays();
         }
 
-        internal string DockId => _cycle.Dock.HasValue ? $"dock/{(int)_cycle.Dock.Value}" : null;
-        internal Transform ResolveDock() => _cycle.Dock.HasValue ? _docks[(int)_cycle.Dock.Value] : null;
-
         internal Carryable RestoreMushroom(string id, int crop, int slot)
         {
-            Carryable mushroom = MakeMushroom(id, slot - 1);
-            if (crop == _cropNumber)
+            GrowingTray tray = System.Array.Find(_trays, pair => pair != null && pair.State.Crop == crop);
+            Carryable mushroom = MakeMushroom(tray ?? _trays[0], id, slot - 1);
+            if (tray != null)
             {
-                _crop[slot - 1] = mushroom;
+                tray.Crop[slot - 1] = mushroom;
             }
 
             return mushroom;
         }
 
-        private Carryable MakeMushroom(string id, int index)
+        private Carryable MakeMushroom(GrowingTray tray, string id, int index)
         {
             Carryable mushroom = Object.Instantiate(_template);
             mushroom.name = $"Mushroom {index + 1}";
             mushroom.gameObject.SetActive(true);
             mushroom.Configure(Kind.Mushroom, 0.022f, _bounds,
-                _tray.transform.TransformPoint(MushroomOffset(index)), id: id);
+                tray.Item.transform.TransformPoint(MushroomOffset(index)), id: id);
             return mushroom;
+        }
+
+        private void BuildTrayPair(GrowthCycle.Tray state, Vector3 trayPosition, Vector3 lidPosition)
+        {
+            Carryable item = MakeTray(trayPosition, TrayId(state.Number));
+            Carryable lid = MakeItem(Kind.Lid, lidPosition, new Vector3(0.41f, 0.025f, 0.31f),
+                state.Number == 1 ? new Color(0.60f, 0.64f, 0.68f) : new Color(0.46f, 0.64f, 0.59f),
+                LidId(state.Number));
+            var tray = new GrowingTray
+            {
+                State = state, Item = item, Lid = lid,
+                Substrate = Surface("Substrate", item.transform, new Vector3(0f, 0.046f, 0.11f),
+                    new Vector3(0.36f, 0.027f, 0.26f))
+            };
+            _trays[state.Number - 1] = tray;
+            if (state.LidClosed)
+            {
+                lid.Store(item.transform, LidPosition);
+            }
+
+            RefreshTray(tray, false);
         }
 
         private static Vector3 MushroomOffset(int index)
@@ -758,7 +933,7 @@ namespace Sporeborn.Runtime
             return new Vector3((index % 4 - 1.5f) * 0.083f, 0.080f, 0.11f + (index / 4 - 1f) * 0.07f);
         }
 
-        private Carryable MakeTray(Vector3 position)
+        private Carryable MakeTray(Vector3 position, string id)
         {
             var root = new GameObject("Growing tray");
             root.transform.position = position;
@@ -767,7 +942,7 @@ namespace Sporeborn.Runtime
                 new Vector3(0.4f, 0.04f, 0.3f), color);
             Block("Harvest platform", root.transform, new Vector3(0f, 0.005f, -0.145f),
                 new Vector3(0.4f, 0.015f, 0.21f), color);
-            return ConfigureItem(root, Kind.Tray, 0.28f, floor.GetComponent<Renderer>());
+            return ConfigureItem(root, Kind.Tray, 0.28f, floor.GetComponent<Renderer>(), id);
         }
 
         private void BuildDevice(Station station, Vector3 position)
@@ -828,18 +1003,18 @@ namespace Sporeborn.Runtime
 
         private static Vector3 DoorPosition(bool open) => new Vector3(0f, open ? 1.45f : 1.035f, -0.34f);
 
-        private Carryable MakeItem(Kind kind, Vector3 worldPosition, Vector3 size, Color color)
+        private Carryable MakeItem(Kind kind, Vector3 worldPosition, Vector3 size, Color color, string id = null)
         {
             var item = new GameObject(kind.ToString());
             item.transform.position = worldPosition;
             Renderer renderer = Block(kind.ToString(), item.transform, Vector3.zero, size, color).GetComponent<Renderer>();
-            return ConfigureItem(item, kind, Mathf.Max(size.x, size.z) * 0.55f, renderer);
+            return ConfigureItem(item, kind, Mathf.Max(size.x, size.z) * 0.55f, renderer, id);
         }
 
-        private Carryable ConfigureItem(GameObject root, Kind kind, float radius, Renderer renderer)
+        private Carryable ConfigureItem(GameObject root, Kind kind, float radius, Renderer renderer, string id = null)
         {
             Carryable item = root.AddComponent<Carryable>();
-            item.Configure(kind, radius, _bounds, root.transform.position, renderer);
+            item.Configure(kind, radius, _bounds, root.transform.position, renderer, id);
             return item;
         }
 

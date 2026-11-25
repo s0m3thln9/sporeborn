@@ -9,7 +9,9 @@ namespace Sporeborn.Runtime
         private static readonly int ColorProperty = Shader.PropertyToID("_Color");
         private const int MaterialsPrice = 50;
         private const int BoxPrice = 10;
-        private const int FirstPurchasedBox = 4;
+        private const int TrayPrice = 180;
+        internal const int FirstPurchasedBox = 4;
+        private enum Offer { Materials, Box, Tray }
 
         [SerializeField] private Carryable _mushroomTemplate;
         [SerializeField] private ShippingBox _boxTemplate;
@@ -18,7 +20,8 @@ namespace Sporeborn.Runtime
         private int _nextBox = FirstPurchasedBox;
         private Collider _materialsOffer;
         private Collider _boxOffer;
-        private Vector3 _boxOutput;
+        private Collider _trayOffer;
+        private Vector3 _supplyOutput;
         private BoxCollider _roomBounds;
         private Material _material;
         private Carryable _printedLabel;
@@ -122,18 +125,19 @@ namespace Sporeborn.Runtime
 
         private void BuildSupplyStand()
         {
-            var position = new Vector3(2.61f, 0.42f, -2.33f);
-            var standSize = new Vector3(0.64f, 0.84f, 1.48f);
+            var position = new Vector3(2.61f, 0.42f, -2.44f);
+            var standSize = new Vector3(0.64f, 0.84f, 1.80f);
             CreateBlock("Supply stand", transform, position, standSize, _material, new Color(0.22f, 0.30f, 0.37f));
             AddSign(transform, new Vector3(2.286f, 0.73f, position.z), TowardRoom, "СНАБЖЕНИЕ", 0.036f,
                 Color.white, new Vector2(1.24f, 0.08f));
-            _materialsOffer = BuildOffer("Materials offer", "МАТЕРИАЛЫ · 50", -1.79f);
-            _boxOffer = BuildOffer("Box offer", "КОРОБКА · 10", -2.14f);
+            _materialsOffer = BuildOffer("Materials offer", $"МАТЕРИАЛЫ · {MaterialsPrice}", -1.70f);
+            _boxOffer = BuildOffer("Box offer", $"КОРОБКА · {BoxPrice}", -2.03f);
+            _trayOffer = BuildOffer("Tray offer", $"ЛОТОК · {TrayPrice}", -2.36f);
 
-            var output = new Vector3(position.x, 0.866f, -2.74f);
-            var outputSize = new Vector3(0.55f, 0.052f, 0.47f);
+            var output = new Vector3(position.x, 0.866f, -2.99f);
+            var outputSize = new Vector3(0.55f, 0.052f, 0.57f);
             CreateBlock("Supply pickup", transform, output, outputSize, _material, new Color(0.34f, 0.55f, 0.48f));
-            _boxOutput = output + Vector3.up * (outputSize.y * 0.5f);
+            _supplyOutput = output + Vector3.up * (outputSize.y * 0.5f);
             AddSign(transform, output + new Vector3(-0.278f, 0f, 0f), TowardRoom, "ВЫДАЧА", 0.021f,
                 Color.white, new Vector2(0.40f, 0.041f));
         }
@@ -151,23 +155,25 @@ namespace Sporeborn.Runtime
         internal bool AimAtOffer(Collider target, bool buy, out string prompt, out string detail, out string notice)
         {
             prompt = detail = notice = null;
-            if (target == null || target != _materialsOffer && target != _boxOffer)
+            if (target == null || (target != _materialsOffer && target != _boxOffer && target != _trayOffer))
             {
                 return false;
             }
 
-            bool materials = target == _materialsOffer;
-            int price = materials ? MaterialsPrice : BoxPrice;
-            string product = materials ? "Комплект материалов" : "Пустая коробка";
-            string result = materials ? "В запасы: +4 основы, +1 соломы, +1 премикса, +2 воды, +1 культуры."
-                : "Открытая коробка на 20 грибов появится на выдаче.";
+            Offer offer = target == _materialsOffer ? Offer.Materials : target == _boxOffer ? Offer.Box : Offer.Tray;
+            (int price, string product, string result) = offer switch
+            {
+                Offer.Materials => (MaterialsPrice, "Комплект материалов", "В запасы: +4 основы, +1 соломы, +1 премикса, +2 воды, +1 культуры."),
+                Offer.Box => (BoxPrice, "Пустая коробка", "Открытая коробка на 20 грибов появится на выдаче."),
+                _ => (TrayPrice, "Второй лоток", "Пустой лоток №2 с крышкой появится на выдаче.")
+            };
             detail = $"{product} · Цена: {price} · Баланс: {Money}\n{result}";
-            if (buy && !materials)
+            if (buy && offer != Offer.Materials)
             {
                 Physics.SyncTransforms();
             }
 
-            string refusal = PurchaseRefusal(materials, price);
+            string refusal = PurchaseRefusal(offer, price);
             prompt = refusal ?? $"ЛКМ   Купить за {price}";
             if (!buy)
             {
@@ -180,44 +186,62 @@ namespace Sporeborn.Runtime
                 return true;
             }
 
-            if (materials)
+            switch (offer)
             {
-                if (!Growth.TryRestock())
-                {
-                    notice = "В запасах нет места для комплекта";
-                    return true;
-                }
-            }
-            else
-            {
-                SpawnBox($"box/{_nextBox}", _boxOutput, Quaternion.identity);
-                _nextBox++;
+                case Offer.Materials:
+                    if (!Growth.TryRestock())
+                    {
+                        notice = "В запасах нет места для комплекта";
+                        return true;
+                    }
+
+                    notice = "Комплект добавлен к запасам";
+                    break;
+                case Offer.Box:
+                    SpawnBox($"box/{_nextBox}", _supplyOutput, Quaternion.identity);
+                    _nextBox++;
+                    notice = "Коробка на выдаче";
+                    break;
+                case Offer.Tray:
+                    if (!Growth.TryAddSecondTray(_supplyOutput))
+                    {
+                        notice = "Уже куплено";
+                        return true;
+                    }
+
+                    notice = "Лоток №2 на выдаче";
+                    break;
             }
 
             Money -= price;
             Sounds.Play(WorkshopSounds.Cue.Pack);
-            notice = materials ? "Комплект добавлен к запасам" : "Коробка на выдаче";
             return true;
         }
 
-        private string PurchaseRefusal(bool materials, int price)
+        private string PurchaseRefusal(Offer offer, int price)
         {
+            if (offer == Offer.Tray && Growth.HasSecondTray)
+            {
+                return "Уже куплено";
+            }
+
             if (Money < price)
             {
                 return $"Не хватает {price - Money}";
             }
 
-            if (materials)
+            if (offer == Offer.Materials)
             {
                 return Growth.CanRestock ? null : "В запасах нет места для комплекта";
             }
 
-            if (_nextBox == int.MaxValue)
+            if (offer == Offer.Box && _nextBox == int.MaxValue)
             {
                 return "Невозможно выдать ещё одну коробку";
             }
 
-            return Physics.CheckBox(_boxOutput + Vector3.up * 0.085f, new Vector3(0.25f, 0.083f, 0.21f),
+            float halfDepth = offer == Offer.Tray ? 0.27f : 0.21f;
+            return Physics.CheckBox(_supplyOutput + Vector3.up * 0.085f, new Vector3(0.25f, 0.083f, halfDepth),
                 Quaternion.identity, 1, QueryTriggerInteraction.Ignore) ? "Место выдачи занято" : null;
         }
 
@@ -295,25 +319,20 @@ namespace Sporeborn.Runtime
             }
         }
 
-        internal string NextStep(Carryable held)
+        internal string NextStep(Carryable held, Carryable aimed)
         {
-            string next = Growth.NextStep(held);
+            string next = Growth.NextStep(held, aimed, out int harvestTray);
             if (next != null)
             {
                 return next;
             }
 
-            if (!Growth.HarvestReady)
+            if (Growth.HasUncutMushrooms(harvestTray))
             {
-                return null;
+                return $"Лоток №{harvestTray} · возьмите нож и срежьте грибы.";
             }
 
-            if (Growth.HasUncutMushrooms)
-            {
-                return "Возьмите нож и срежьте грибы.";
-            }
-
-            if (Growth.HasMushroomsOnPlatform || held != null && held.Kind == Carryable.ItemKind.Mushroom)
+            if (Growth.HasMushroomsOnPlatform(harvestTray) || held != null && held.Kind == Carryable.ItemKind.Mushroom)
             {
                 return _boxes.Count == 0 ? "Купите пустую коробку на стенде «Снабжение»."
                     : "Переложите грибы с площадки в открытую коробку.";
@@ -339,7 +358,7 @@ namespace Sporeborn.Runtime
                 return "Поднимите коробку и поставьте её в зону отправки.";
             }
 
-            return "Утилизируйте отработанный субстрат. Возьмите лоток и нажмите над баком.";
+            return $"Лоток №{harvestTray} · утилизируйте субстрат. Возьмите лоток и нажмите над баком.";
         }
 
         public bool TryCut(Carryable mushroom)

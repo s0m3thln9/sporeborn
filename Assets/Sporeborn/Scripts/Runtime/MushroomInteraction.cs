@@ -1,3 +1,4 @@
+using Sporeborn.Gameplay.Growing;
 using UnityEngine;
 
 namespace Sporeborn.Runtime
@@ -19,6 +20,7 @@ namespace Sporeborn.Runtime
 
         private Carryable _held;
         private Carryable _aimed;
+        private Carryable _guidanceTarget;
         private CharacterController _player;
         private string _prompt;
         private string _detail;
@@ -61,6 +63,7 @@ namespace Sporeborn.Runtime
         public void ClearAim()
         {
             SetAimed(null);
+            _guidanceTarget = null;
             _prompt = null;
             _detail = null;
             _placementPrompt = null;
@@ -98,6 +101,7 @@ namespace Sporeborn.Runtime
             }
 
             Carryable target = hitSomething && hit.rigidbody != null ? hit.rigidbody.GetComponent<Carryable>() : null;
+            _guidanceTarget = target;
             ShippingBox targetBox = target != null && target.Kind == Carryable.ItemKind.Box
                 ? target.GetComponent<ShippingBox>() : null;
 
@@ -404,16 +408,23 @@ namespace Sporeborn.Runtime
 
         private void DrawGuidance(float panelWidth, bool isPlaying)
         {
-            string next = isPlaying ? _batch.NextStep(_held) : _resumePrompt;
+            string next = isPlaying ? _batch.NextStep(_held, _guidanceTarget) : _resumePrompt;
             string notice = isPlaying && Time.time < _noticeUntil ? _notice : null;
             string detail = isPlaying ? _detail : null;
+            string treatment = isPlaying ? _batch.Growth.TimerReading(Station.Treatment) : null;
+            string incubation = isPlaying ? _batch.Growth.TimerReading(Station.Incubation) : null;
+            string fruiting = isPlaying ? _batch.Growth.TimerReading(Station.Fruiting) : null;
             float textWidth = panelWidth - 28f;
-            float height = 46f + RowHeight(next, textWidth) + RowHeight(detail, textWidth) + RowHeight(notice, textWidth);
+            float height = 46f + RowHeight(next, textWidth) + RowHeight(detail, textWidth) + RowHeight(notice, textWidth) +
+                RowHeight(treatment, textWidth) + RowHeight(incubation, textWidth) + RowHeight(fruiting, textWidth);
 
             DrawSurface(new Rect(18f, 18f, panelWidth, height), new Color(0.035f, 0.065f, 0.08f, 0.94f));
             GUI.Label(new Rect(32f, 29f, textWidth, 22f), "\u0421\u041b\u0415\u0414\u0423\u042e\u0429\u0418\u0419 \u0428\u0410\u0413", _panelTitleStyle);
             float y = 52f;
             DrawRow(next, textWidth, ref y);
+            DrawRow(treatment, textWidth, ref y);
+            DrawRow(incubation, textWidth, ref y);
+            DrawRow(fruiting, textWidth, ref y);
             DrawRow(detail, textWidth, ref y);
             DrawRow(notice, textWidth, ref y);
         }

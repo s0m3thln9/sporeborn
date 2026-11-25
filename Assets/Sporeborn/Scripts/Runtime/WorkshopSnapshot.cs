@@ -7,14 +7,12 @@ using Sporeborn.Gameplay.Packaging;
 using Sporeborn.Persistence;
 using UnityEngine;
 using Object = UnityEngine.Object;
+using static Sporeborn.Runtime.WorkshopSnapshot;
 
 namespace Sporeborn.Runtime
 {
     public sealed partial class WorkshopBatch
     {
-        private static readonly string[] FixedIds =
-            { "Knife", "Scoop", "Cup", "Mixer", "Inoculator", "Bowl", "Tray", "Lid" };
-
         internal WorkshopSave Capture(FirstPersonPlayer player)
         {
             var save = new WorkshopSave
@@ -25,7 +23,7 @@ namespace Sporeborn.Runtime
                 nextBox = _nextBox,
                 printerLabel = _printedLabel != null ? _printedLabel.Id : null,
                 items = SceneItems().Values.Select(item => item.Capture(item.Kind == Carryable.ItemKind.Tray
-                    ? Growth.DockId : item.transform.parent != null
+                    ? Growth.DockIdFor(item) : item.transform.parent != null
                         ? item.transform.parent.GetComponent<Carryable>()?.Id : null)).ToArray(),
                 boxes = _boxes.Values.Select(box => box.Capture()).ToArray()
             };
@@ -36,10 +34,10 @@ namespace Sporeborn.Runtime
 
         internal void Resume(WorkshopSave save, FirstPersonPlayer player, MushroomInteraction interaction)
         {
-            Dictionary<string, ItemSave> records = Validate(save);
+            Dictionary<string, ItemSave> records = Validate(save, out GrowthCycle.Snapshot growth);
+            Growth.Restore(save, growth, _supplyOutput);
             Dictionary<string, Carryable> items = SceneItems();
             ILookup<string, ItemSave> children = records.Values.ToLookup(item => item.parent, StringComparer.Ordinal);
-            Growth.Restore(save);
             foreach (string id in _boxes.Keys.Where(id => !records.ContainsKey(id)).ToArray())
             {
                 ShippingBox box = _boxes[id];
@@ -53,7 +51,7 @@ namespace Sporeborn.Runtime
             {
                 if (!_boxes.ContainsKey(box.id))
                 {
-                    items.Add(box.id, SpawnBox(box.id, _boxOutput, Quaternion.identity).Item);
+                    items.Add(box.id, SpawnBox(box.id, _supplyOutput, Quaternion.identity).Item);
                 }
             }
 
@@ -75,9 +73,8 @@ namespace Sporeborn.Runtime
             {
                 Carryable item = items[record.id];
                 Transform parent = record.location == ItemLocation.Held ? interaction.Hand
-                    : !HasParent(record) ? null : record.parent == Growth.DockId ? Growth.ResolveDock()
-                    : items[record.parent].transform;
-                item.RestoreSnapshot(record, parent, save.growth.stage == TrayStage.Fruiting && record.location == ItemLocation.Rooted);
+                    : !HasParent(record) ? null : Growth.ResolveDock(item) ?? items[record.parent].transform;
+                item.RestoreSnapshot(record, parent, IsFruiting(record, growth));
                 if (record.location == ItemLocation.Held)
                 {
                     interaction.RestoreHeld(item);
@@ -113,43 +110,44 @@ namespace Sporeborn.Runtime
                 .ToDictionary(item => item.Id, StringComparer.Ordinal);
         }
 
-        private static Dictionary<string, ItemSave> Validate(WorkshopSave save)
+    }
+
+    internal static class WorkshopSnapshot
+    {
+        private static readonly string[] FixedIds = { "Knife", "Scoop", "Cup", "Mixer", "Inoculator", "Bowl" };
+
+        internal static Dictionary<string, ItemSave> Validate(WorkshopSave save, out GrowthCycle.Snapshot growth)
         {
+            growth = save?.GrowthSnapshot();
             if (save == null || !WorkshopSaveFile.IsSupportedVersion(save.version) || save.items == null || save.boxes == null ||
-                save.money < 0 || save.money % 10 != 0 || NextBoxId(save) < FirstPurchasedBox ||
-                save.nextLabel < 1 || save.cropNumber < 1 ||
-                save.scoop < -1 || save.scoop > 2 || !Finite(save.playerPosition) ||
+                save.money < 0 || save.money % 10 != 0 || NextBoxId(save) < WorkshopBatch.FirstPurchasedBox ||
+                save.nextLabel < 1 || save.scoop < -1 || save.scoop > 2 || !Finite(save.playerPosition) ||
                 !float.IsFinite(save.yaw) || !float.IsFinite(save.pitch) || Mathf.Abs(save.pitch) > 85f ||
-                !new GrowthCycle().TryRestore(save.growth))
+                !GrowthCycle.IsValid(growth))
             {
                 throw InvalidSave();
             }
 
-            var items = new Dictionary<string, ItemSave>(StringComparer.Ordinal);
             var boxes = new Dictionary<string, BoxSave>(StringComparer.Ordinal);
             int nextBox = NextBoxId(save);
             foreach (BoxSave box in save.boxes)
             {
                 if (box == null || !TryBoxId(box.id, out int sequence) || sequence >= nextBox ||
-                    box.flaps < 0 || box.flaps > ShippingBoxContents.FlapCount ||
-                    !boxes.TryAdd(box.id, box))
+                    box.flaps < 0 || box.flaps > ShippingBoxContents.FlapCount || !boxes.TryAdd(box.id, box))
                 {
                     throw InvalidSave();
                 }
             }
 
+            var items = new Dictionary<string, ItemSave>(StringComparer.Ordinal);
             int hands = 0;
             foreach (ItemSave item in save.items)
             {
                 if (item == null || string.IsNullOrEmpty(item.id) || !items.TryAdd(item.id, item) ||
                     !Finite(item.position) || !Finite(item.recoveryPosition) ||
                     !Rotation(item.rotation) || !Rotation(item.recoveryRotation) ||
-                    !Enum.IsDefined(typeof(ItemLocation), item.location))
-                {
-                    throw InvalidSave();
-                }
-
-                if (item.location == ItemLocation.Held && ++hands > 1)
+                    !Enum.IsDefined(typeof(ItemLocation), item.location) ||
+                    (item.location == ItemLocation.Held && ++hands > 1))
                 {
                     throw InvalidSave();
                 }
@@ -162,20 +160,40 @@ namespace Sporeborn.Runtime
                 throw InvalidSave();
             }
 
-            int cropOnTray = 0;
-            string dockId = save.growth.dock < 0 ? null : $"dock/{save.growth.dock}";
-            foreach (ItemSave item in items.Values)
+            ILookup<string, ItemSave> children = items.Values.ToLookup(item => item.parent, StringComparer.Ordinal);
+            var trays = new Dictionary<string, GrowthCycle.TraySnapshot>(StringComparer.Ordinal);
+            var pairedItems = new HashSet<string>(StringComparer.Ordinal);
+            for (int index = 0; index < growth.trays.Length; index++)
             {
-                bool mushroom = TryMushroomId(item.id, out int crop, out _);
-                bool label = TryLabelId(item.id, out int labelNumber);
-                if ((!mushroom && !label && !boxes.ContainsKey(item.id) && Array.IndexOf(FixedIds, item.id) < 0) ||
-                    (label && labelNumber >= save.nextLabel) || (mushroom && crop > save.cropNumber))
+                int number = index + 1;
+                GrowthCycle.TraySnapshot tray = growth.trays[index];
+                string trayId = WorkshopGrowth.TrayId(number);
+                string lidId = WorkshopGrowth.LidId(number);
+                int dock = Array.FindIndex(growth.devices, device => device.trayNumber == number);
+                ValidateFixtureItem(items, trayId, dock < 0 ? null : $"dock/{dock}");
+                ValidateFixtureItem(items, lidId, tray.lidClosed ? trayId : null);
+                trays.Add(trayId, tray);
+                pairedItems.Add(trayId);
+                pairedItems.Add(lidId);
+
+                if (tray.stage == TrayStage.Fruiting &&
+                    children[trayId].Count(item => item.location == ItemLocation.Rooted) != GrowthCycle.MushroomCount)
                 {
                     throw InvalidSave();
                 }
+            }
 
-                if ((item.id == "Tray" && (item.location == ItemLocation.Stored) != (dockId != null)) ||
-                    (item.id == "Lid" && (item.location == ItemLocation.Stored) != save.growth.lidClosed))
+            foreach (ItemSave item in items.Values)
+            {
+                if (pairedItems.Contains(item.id))
+                {
+                    continue;
+                }
+
+                bool mushroom = TryMushroomId(item.id, out int crop, out _);
+                bool label = TryLabelId(item.id, out int labelNumber);
+                if ((!mushroom && !label && !boxes.ContainsKey(item.id) && Array.IndexOf(FixedIds, item.id) < 0) ||
+                    (label && labelNumber >= save.nextLabel) || (mushroom && crop >= growth.nextCrop))
                 {
                     throw InvalidSave();
                 }
@@ -190,30 +208,17 @@ namespace Sporeborn.Runtime
                     continue;
                 }
 
-                bool docked = item.id == "Tray" && item.parent == dockId && item.location == ItemLocation.Stored;
-                bool lid = item.id == "Lid" && item.parent == "Tray" && item.location == ItemLocation.Stored;
-                bool onTray = mushroom && item.parent == "Tray" && crop == save.cropNumber &&
-                    ((item.location == ItemLocation.Rooted && save.growth.stage == TrayStage.Fruiting) ||
-                        ((item.location == ItemLocation.Resting || item.location == ItemLocation.Rooted) &&
-                            save.growth.stage == TrayStage.Harvest));
+                bool onTray = mushroom && trays.TryGetValue(item.parent, out GrowthCycle.TraySnapshot tray) &&
+                    crop == tray.crop && ((tray.stage == TrayStage.Fruiting && item.location == ItemLocation.Rooted) ||
+                        (tray.stage == TrayStage.Harvest &&
+                            (item.location == ItemLocation.Resting || item.location == ItemLocation.Rooted)));
                 bool packed = (mushroom || label) && item.location == ItemLocation.Stored && boxes.ContainsKey(item.parent);
-                if (!docked && !lid && !onTray && !packed)
+                if (!onTray && !packed)
                 {
                     throw InvalidSave();
                 }
-
-                if (onTray)
-                {
-                    cropOnTray++;
-                }
             }
 
-            if (save.growth.stage == TrayStage.Fruiting && cropOnTray != 12)
-            {
-                throw InvalidSave();
-            }
-
-            ILookup<string, ItemSave> children = items.Values.ToLookup(item => item.parent, StringComparer.Ordinal);
             foreach (BoxSave box in boxes.Values)
             {
                 IEnumerable<ItemSave> contents = children[box.id];
@@ -228,9 +233,37 @@ namespace Sporeborn.Runtime
             return items;
         }
 
-        private static bool HasParent(ItemSave item) => !string.IsNullOrEmpty(item.parent);
-        private static int NextBoxId(WorkshopSave save) =>
-            save.version == WorkshopSave.LegacyVersion ? FirstPurchasedBox : save.nextBox;
+        private static void ValidateFixtureItem(Dictionary<string, ItemSave> items, string id, string owner)
+        {
+            if (!items.TryGetValue(id, out ItemSave item) || (owner == null
+                ? HasParent(item) || item.location == ItemLocation.Stored || item.location == ItemLocation.Rooted
+                : item.parent != owner || item.location != ItemLocation.Stored))
+            {
+                throw InvalidSave();
+            }
+        }
+
+        internal static bool IsFruiting(ItemSave record, GrowthCycle.Snapshot growth)
+        {
+            if (record.location != ItemLocation.Rooted)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < growth.trays.Length; index++)
+            {
+                if (record.parent == WorkshopGrowth.TrayId(index + 1))
+                {
+                    return growth.trays[index].stage == TrayStage.Fruiting;
+                }
+            }
+
+            return false;
+        }
+
+        internal static bool HasParent(ItemSave item) => !string.IsNullOrEmpty(item.parent);
+        internal static int NextBoxId(WorkshopSave save) =>
+            save.version == WorkshopSave.LegacyVersion ? WorkshopBatch.FirstPurchasedBox : save.nextBox;
 
         private static bool TryBoxId(string id, out int sequence)
         {
@@ -239,14 +272,14 @@ namespace Sporeborn.Runtime
                 int.TryParse(id.AsSpan(4), out sequence) && sequence > 0 && id == $"box/{sequence}";
         }
 
-        private static bool TryLabelId(string id, out int sequence)
+        internal static bool TryLabelId(string id, out int sequence)
         {
             sequence = 0;
             return id.StartsWith("label/", StringComparison.Ordinal) && int.TryParse(id.Substring(6), out sequence) &&
                 sequence > 0 && id == $"label/{sequence}";
         }
 
-        private static bool TryMushroomId(string id, out int crop, out int slot)
+        internal static bool TryMushroomId(string id, out int crop, out int slot)
         {
             crop = slot = 0;
             if (!id.StartsWith("mushroom/", StringComparison.Ordinal))
@@ -256,7 +289,7 @@ namespace Sporeborn.Runtime
 
             int separator = id.IndexOf('/', 9);
             return separator > 9 && int.TryParse(id.AsSpan(9, separator - 9), out crop) &&
-                int.TryParse(id.AsSpan(separator + 1), out slot) && crop >= 1 && slot >= 1 && slot <= 12 &&
+                int.TryParse(id.AsSpan(separator + 1), out slot) && crop >= 1 && slot >= 1 && slot <= GrowthCycle.MushroomCount &&
                 id == $"mushroom/{crop}/{slot}";
         }
 

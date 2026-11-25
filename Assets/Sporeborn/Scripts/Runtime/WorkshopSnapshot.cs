@@ -60,7 +60,8 @@ namespace Sporeborn.Runtime
                 }
             }
 
-            player.RestorePose(save);
+            Physics.SyncTransforms();
+            player.RestorePose(save, _roomBounds.bounds);
             foreach (ItemSave record in records.Values)
             {
                 Carryable item = items[record.id];

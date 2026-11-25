@@ -28,14 +28,48 @@ namespace Sporeborn.Runtime
             save.pitch = _pitch;
         }
 
-        internal void RestorePose(WorkshopSave save)
+        internal void RestorePose(WorkshopSave save, Bounds room)
         {
             _controller.enabled = false;
-            transform.SetPositionAndRotation(save.playerPosition, Quaternion.Euler(0f, save.yaw, 0f));
+            Vector3 position = FindFreePosition(save.playerPosition, room);
+            transform.SetPositionAndRotation(position, Quaternion.Euler(0f, save.yaw, 0f));
             _controller.enabled = true;
             _verticalSpeed = 0f;
             _pitch = save.pitch;
             _playerCamera.transform.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
+        }
+
+        private Vector3 FindFreePosition(Vector3 saved, Bounds room)
+        {
+            if (CanStand(saved, room))
+            {
+                return saved;
+            }
+
+            for (int ring = 1; ring <= 4; ring++)
+            {
+                for (int direction = 0; direction < 8; direction++)
+                {
+                    float radians = direction * Mathf.PI / 4f;
+                    var offset = new Vector3(Mathf.Cos(radians), 0f, Mathf.Sin(radians)) * (ring * 0.18f);
+                    Vector3 candidate = saved + offset;
+                    if (CanStand(candidate, room))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+
+            return transform.position;
+        }
+
+        private bool CanStand(Vector3 position, Bounds room)
+        {
+            Vector3 middle = position + _controller.center;
+            float radius = _controller.radius;
+            Vector3 offset = Vector3.up * Mathf.Max(0f, _controller.height * 0.5f - radius);
+            return room.Contains(middle) && !Physics.CheckCapsule(middle - offset, middle + offset,
+                radius - 0.01f, 1, QueryTriggerInteraction.Ignore);
         }
 
         private void Awake()

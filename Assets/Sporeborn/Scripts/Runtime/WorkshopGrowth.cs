@@ -76,7 +76,9 @@ namespace Sporeborn.Runtime
             MakeItem(Kind.Inoculator, new Vector3(-1.74f, 0.904f, 0.19f), new Vector3(0.044f, 0.048f, 0.16f),
                 new Color(0.80f, 0.77f, 0.53f));
             Carryable bowl = MakeItem(Kind.Bowl, new Vector3(-1.76f, 0.917f, -0.23f),
-                new Vector3(0.27f, 0.074f, 0.25f), new Color(0.32f, 0.37f, 0.43f));
+                new Vector3(0.27f, 0.074f, 0.25f), new Color(0.18f, 0.42f, 0.35f));
+            WorkshopBatch.AddSign(bowl.transform, bowl.transform.TransformPoint(0.137f, 0f, 0f),
+                Quaternion.Euler(0f, -90f, 0f), "СМЕСЬ", 0.021f, Color.white, new Vector2(0.215f, 0.045f));
             _mixture = Surface("Mixture", bowl.transform, Vector3.up * 0.039f, new Vector3(0.24f, 0.012f, 0.22f));
 
             Vector3 trayPosition = platform + new Vector3(0f, -0.022f, 0.11f);
@@ -140,20 +142,20 @@ namespace Sporeborn.Runtime
                 string device = Stations[(int)station];
                 if (_cycle.IsWorking(station))
                 {
-                    string wait = $"{device} \u00b7 \u043e\u0441\u0442\u0430\u043b\u043e\u0441\u044c {Mathf.CeilToInt(_cycle.Remaining)} \u0441.";
+                    string wait = $"{device} · осталось {Mathf.CeilToInt(_cycle.Remaining)} с.";
                     return station == Station.Incubation
-                        ? $"{wait} \u041f\u043e\u0434\u043d\u0435\u0441\u0438\u0442\u0435 \u043e\u0442\u043a\u0440\u044b\u0442\u0443\u044e \u043a\u043e\u0440\u043e\u0431\u043a\u0443 \u0438 \u043d\u0430\u043f\u0435\u0447\u0430\u0442\u0430\u0439\u0442\u0435 \u044d\u0442\u0438\u043a\u0435\u0442\u043a\u0443."
+                        ? $"{wait} Поднесите открытую коробку и напечатайте этикетку."
                         : wait;
                 }
 
                 if (_cycle.IsDone(station))
                 {
-                    return _cycle.IsOpen(station) ? $"{device} \u00b7 \u0432\u044b\u043d\u044c\u0442\u0435 \u043b\u043e\u0442\u043e\u043a \u041b\u041a\u041c \u043d\u0430 \u043f\u043e\u043b\u043a\u0435."
-                        : $"{device} \u00b7 \u0433\u043e\u0442\u043e\u0432\u043e. \u041e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u0434\u0432\u0435\u0440\u0446\u0443 \u041b\u041a\u041c.";
+                    return _cycle.IsOpen(station) ? $"{device} · выньте лоток на полке."
+                        : $"{device} · готово. Откройте дверцу.";
                 }
 
-                return _cycle.IsOpen(station) ? $"{device} \u00b7 \u0437\u0430\u043a\u0440\u043e\u0439\u0442\u0435 \u0434\u0432\u0435\u0440\u0446\u0443 \u041b\u041a\u041c."
-                    : $"{device} \u00b7 \u043d\u0430\u0436\u043c\u0438\u0442\u0435 \u041b\u041a\u041c \u043d\u0430 \u0437\u0435\u043b\u0451\u043d\u043e\u0439 \u043a\u043d\u043e\u043f\u043a\u0435.";
+                return _cycle.IsOpen(station) ? $"{device} · закройте дверцу."
+                    : $"{device} · нажмите зелёную кнопку.";
             }
 
             return _cycle.Stage switch
@@ -164,7 +166,7 @@ namespace Sporeborn.Runtime
                 TrayStage.Inoculated => LoadStep(Station.Incubation, true, held),
                 TrayStage.Colonized => LoadStep(Station.Fruiting, false, held),
                 TrayStage.Harvest when _cycle.LidClosed => LidStep(false, held),
-                TrayStage.Harvest when held == _tray => "\u041f\u043e\u0441\u0442\u0430\u0432\u044c\u0442\u0435 \u043b\u043e\u0442\u043e\u043a \u043d\u0430 \u0441\u0442\u043e\u043b (G).",
+                TrayStage.Harvest when held == _tray => "Поставьте лоток на стол.",
                 _ => null
             };
         }
@@ -187,20 +189,20 @@ namespace Sporeborn.Runtime
 
             if (_cycle.MixReady)
             {
-                return "\u0413\u043e\u0442\u043e\u0432\u0430\u044f \u0441\u043c\u0435\u0441\u044c. \u0412\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u0451\u043c\u043a\u043e\u0441\u0442\u044c (E) \u0438 \u043f\u0435\u0440\u0435\u043b\u043e\u0436\u0438\u0442\u0435 \u0441\u043c\u0435\u0441\u044c \u0432 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0439 \u043b\u043e\u0442\u043e\u043a (\u041b\u041a\u041c).";
+                return "Готовая смесь. Возьмите ёмкость и переложите смесь в открытый лоток.";
             }
 
             if (_cycle.Count(Portion.Base) < 4 || _cycle.Count(Portion.Straw) < 1 || _cycle.Count(Portion.Premix) < 1)
             {
-                return "\u0421\u0442\u043e\u043b \u043f\u043e\u0434\u0433\u043e\u0442\u043e\u0432\u043a\u0438 \u0441\u043b\u0435\u0432\u0430. \u0412\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u0441\u043e\u0432\u043e\u043a (E). \u041b\u041a\u041c \u043d\u0430\u0431\u0438\u0440\u0430\u0435\u0442 \u0438 \u043f\u0435\u0440\u0435\u043d\u043e\u0441\u0438\u0442 \u043f\u043e\u0440\u0446\u0438\u0438: 4 \u043e\u0441\u043d\u043e\u0432\u044b, 1 \u0441\u043e\u043b\u043e\u043c\u044b \u0438 1 \u043f\u0440\u0435\u043c\u0438\u043a\u0441\u0430.";
+                return "Стол подготовки слева. Возьмите совок. Наберите порции и перенесите их в ёмкость «СМЕСЬ»: 4 основы, 1 соломы и 1 премикса.";
             }
 
             if (_cycle.Count(Portion.Water) < 2)
             {
-                return "\u0412\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043a\u0440\u0443\u0436\u043a\u0443 (E) \u0438 \u0434\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u0432 \u0451\u043c\u043a\u043e\u0441\u0442\u044c \u0434\u0432\u0435 \u043f\u043e\u0440\u0446\u0438\u0438 \u0432\u043e\u0434\u044b (\u041b\u041a\u041c).";
+                return "Возьмите кружку и добавьте в ёмкость «СМЕСЬ» две порции воды.";
             }
 
-            return "\u0412\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043c\u0435\u0448\u0430\u043b\u043a\u0443 (E) \u0438 \u0434\u0432\u0438\u0433\u0430\u0439\u0442\u0435 \u043c\u044b\u0448\u044c\u044e \u043d\u0430\u0434 \u0441\u043c\u0435\u0441\u044c\u044e 5 \u0441\u0435\u043a\u0443\u043d\u0434.";
+            return "Возьмите мешалку и двигайте мышью над ёмкостью «СМЕСЬ» 5 секунд.";
         }
 
         private string CultureStep(Carryable held)
@@ -212,11 +214,11 @@ namespace Sporeborn.Runtime
 
             if (!_cycle.JarOpen && !_cultureLoaded)
             {
-                return "\u041f\u043e\u043b\u043e\u0436\u0438\u0442\u0435 \u043a\u0440\u044b\u0448\u043a\u0443 \u043d\u0430 \u0441\u0442\u043e\u043b (G) \u0438 \u043e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u0431\u0430\u043d\u043a\u0443 \u043c\u0438\u0446\u0435\u043b\u0438\u044f \u041b\u041a\u041c.";
+                return "Положите крышку на стол и откройте банку мицелия.";
             }
 
-            return _cultureLoaded ? "\u0412\u043d\u0435\u0441\u0438\u0442\u0435 \u043c\u0438\u0446\u0435\u043b\u0438\u0439 \u0432 \u043e\u0442\u043a\u0440\u044b\u0442\u044b\u0439 \u043b\u043e\u0442\u043e\u043a \u041b\u041a\u041c."
-                : "\u0412\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043c\u0435\u0440\u043a\u0443 (E) \u0438 \u043d\u0430\u0431\u0435\u0440\u0438\u0442\u0435 \u043c\u0438\u0446\u0435\u043b\u0438\u0439 \u0438\u0437 \u0431\u0430\u043d\u043a\u0438 (\u041b\u041a\u041c).";
+            return _cultureLoaded ? "Внесите мицелий в открытый лоток."
+                : "Возьмите мерку и наберите мицелий из банки.";
         }
 
         private string LoadStep(Station station, bool needsLid, Carryable held)
@@ -229,22 +231,22 @@ namespace Sporeborn.Runtime
             string device = Stations[(int)station];
             if (!_cycle.IsOpen(station))
             {
-                return held == _tray ? $"\u041f\u043e\u0441\u0442\u0430\u0432\u044c\u0442\u0435 \u043b\u043e\u0442\u043e\u043a (G) \u0438 \u043e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u0434\u0432\u0435\u0440\u0446\u0443. \u0414\u0430\u043b\u044c\u0448\u0435 \u00b7 {device}."
-                    : $"{device} \u00b7 \u043e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u0434\u0432\u0435\u0440\u0446\u0443 \u041b\u041a\u041c.";
+                return held == _tray ? $"Поставьте лоток и откройте дверцу. Дальше · {device}."
+                    : $"{device} · откройте дверцу.";
             }
 
-            return $"{device} \u00b7 \u0432\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043b\u043e\u0442\u043e\u043a (E) \u0438 \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u0435 \u0435\u0433\u043e \u041b\u041a\u041c \u043d\u0430 \u043f\u043e\u043b\u043a\u0435.";
+            return $"{device} · возьмите лоток и загрузите его на полке.";
         }
 
         private string LidStep(bool close, Carryable held)
         {
             if (held == _tray)
             {
-                return "\u041f\u043e\u0441\u0442\u0430\u0432\u044c\u0442\u0435 \u043b\u043e\u0442\u043e\u043a (G), \u0447\u0442\u043e\u0431\u044b \u043f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u0434\u043e\u0441\u0442\u0443\u043f \u043a \u043a\u0440\u044b\u0448\u043a\u0435.";
+                return "Поставьте лоток, чтобы получить доступ к крышке.";
             }
 
-            return close ? "\u0412\u043e\u0437\u044c\u043c\u0438\u0442\u0435 \u043a\u0440\u044b\u0448\u043a\u0443 (E) \u0438 \u0437\u0430\u043a\u0440\u043e\u0439\u0442\u0435 \u043b\u043e\u0442\u043e\u043a \u041b\u041a\u041c."
-                : "\u041d\u0430\u0432\u0435\u0434\u0438\u0442\u0435 \u043f\u0440\u0438\u0446\u0435\u043b \u043d\u0430 \u043b\u043e\u0442\u043e\u043a \u0438 \u0441\u043d\u0438\u043c\u0438\u0442\u0435 \u043a\u0440\u044b\u0448\u043a\u0443 \u041b\u041a\u041c \u0441\u0432\u043e\u0431\u043e\u0434\u043d\u044b\u043c\u0438 \u0440\u0443\u043a\u0430\u043c\u0438.";
+            return close ? "Возьмите крышку и закройте лоток."
+                : "Наведите прицел на лоток и снимите крышку свободными руками.";
         }
 
         public bool TryCut(Carryable mushroom)

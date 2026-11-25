@@ -194,7 +194,7 @@ namespace Sporeborn.Runtime
                 location = location,
                 position = IsHeld ? Vector3.zero : cutting ? _cutLanding :
                     string.IsNullOrEmpty(parent) ? transform.position : transform.localPosition,
-                rotation = IsHeld ? transform.localRotation :
+                rotation = IsHeld ? Quaternion.Euler(0f, _placementYawOffset, 0f) :
                     string.IsNullOrEmpty(parent) ? transform.rotation : transform.localRotation,
                 recoveryPosition = _lastReachablePosition,
                 recoveryRotation = _lastReachableRotation
@@ -207,7 +207,8 @@ namespace Sporeborn.Runtime
             _lastReachableRotation = save.recoveryRotation;
             _body.isKinematic = true;
             transform.SetParent(parent, false);
-            transform.SetLocalPositionAndRotation(save.position, save.rotation);
+            Quaternion localRotation = save.location == ItemLocation.Held ? Quaternion.identity : save.rotation;
+            transform.SetLocalPositionAndRotation(save.position, localRotation);
             _state = save.location switch
             {
                 ItemLocation.Held => State.Held,
@@ -339,7 +340,6 @@ namespace Sporeborn.Runtime
             }
 
             _placementYawOffset = Mathf.Repeat(_placementYawOffset + scrollSteps * DegreesPerScrollStep, 360f);
-            transform.localRotation = Quaternion.Euler(0f, _placementYawOffset, 0f);
         }
 
         internal bool TryGetPlacement(RaycastHit surface, Quaternion rotation, out Vector3 position, out Bounds footprint)

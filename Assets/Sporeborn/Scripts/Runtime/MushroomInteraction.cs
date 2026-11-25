@@ -83,8 +83,8 @@ namespace Sporeborn.Runtime
             _placementPrompt = null;
             if (_held != null)
             {
-                UpdateHand(aim.origin);
                 _held.RotateForPlacement(scrollSteps);
+                UpdateHand(aim.origin);
                 if (drop)
                 {
                     _held.Drop(_player, aim.origin);
@@ -318,6 +318,12 @@ namespace Sporeborn.Runtime
         {
             bool large = _held.Kind == Carryable.ItemKind.Box || _held.Kind == Carryable.ItemKind.Tray;
             Vector3 localOffset = large ? new Vector3(0.34f, -0.47f, 0.54f) : _handPosition + new Vector3(0.08f, -0.07f, 0f);
+            if (_held.Kind == Carryable.ItemKind.Knife)
+            {
+                float cutProgress = Mathf.Clamp01((_cutUntil - Time.time) / 0.24f);
+                localOffset.y -= 0.10f * Mathf.Sin(cutProgress * Mathf.PI);
+            }
+
             Vector3 offset = (large ? transform : _hand.parent).TransformVector(localOffset);
             float distance = offset.magnitude;
             Vector3 direction = offset.normalized;
@@ -328,18 +334,7 @@ namespace Sporeborn.Runtime
                 distance = hit.distance;
             }
 
-            _hand.position = cameraPosition + direction * distance;
-            float cutProgress = Mathf.Clamp01((_cutUntil - Time.time) / 0.24f);
-            if (large)
-            {
-                _hand.rotation = transform.rotation;
-            }
-            else
-            {
-                _hand.localRotation = _held.Kind == Carryable.ItemKind.Knife
-                    ? Quaternion.Euler(42f * Mathf.Sin(cutProgress * Mathf.PI), 0f, 0f)
-                    : Quaternion.identity;
-            }
+            _hand.SetPositionAndRotation(cameraPosition + direction * distance, _held.PlacementRotation);
         }
 
         private void OnGUI()

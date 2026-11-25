@@ -30,6 +30,7 @@ namespace Sporeborn.Runtime
         public float Radius { get; private set; } = 0.022f;
         public bool CanCut => NeedsCut && !_covered;
         internal bool NeedsCut => _state == State.Rooted;
+        internal Quaternion PlacementRotation => Quaternion.Euler(0f, _lastReachableRotation.eulerAngles.y, 0f);
         private bool _covered;
         private Vector3 _cutLanding;
         public string Id { get; private set; }

@@ -285,9 +285,9 @@ namespace Sporeborn.Runtime
             }
             else if (target == _tray)
             {
-                detail = TrayStatus();
                 if (_cycle.Dock == null)
                 {
+                    detail = TrayStatus();
                     prompt = AimAtTray(hand, ref held, click && (held == null || nearTool));
                 }
                 else if (held == null)
@@ -297,17 +297,17 @@ namespace Sporeborn.Runtime
             }
             else if (_doors.TryGetValue(collider, out Station station))
             {
-                detail = DeviceStatus(station);
+                detail = _cycle.Dock == station ? null : DeviceStatus(station);
                 prompt = DevicePrompt(station, true, false, hand, ref held, click);
             }
             else if (_slots.TryGetValue(collider, out station))
             {
-                detail = DeviceStatus(station);
+                detail = _cycle.Dock == station ? null : DeviceStatus(station);
                 prompt = DevicePrompt(station, false, false, hand, ref held, click);
             }
             else if (_starts.TryGetValue(collider, out station))
             {
-                detail = DeviceStatus(station);
+                detail = _cycle.Dock == station ? null : DeviceStatus(station);
                 prompt = DevicePrompt(station, false, true, hand, ref held, click);
             }
             else if (collider == _waste)

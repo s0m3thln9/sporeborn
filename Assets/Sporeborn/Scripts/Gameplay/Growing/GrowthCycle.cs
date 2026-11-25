@@ -30,12 +30,44 @@ namespace Sporeborn.Gameplay.Growing
         public bool HasMix => Array.Exists(_mix, count => count > 0);
         public bool MixReady => Mixing >= MixingSeconds && _mix[0] == Recipe[0] &&
             _mix[1] == Recipe[1] && _mix[2] == Recipe[2] && _mix[3] == Recipe[3];
+        public bool CanRestock
+        {
+            get
+            {
+                for (int index = 0; index < _stock.Length; index++)
+                {
+                    if (_stock[index] > int.MaxValue - BundleAmount(index))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        }
 
         public int Stock(Portion portion) => _stock[(int)portion];
         public int Count(Portion portion) => _mix[(int)portion];
         public bool IsOpen(Station station) => _doors[(int)station];
         public bool IsWorking(Station station) => Dock == station && Remaining > 0f;
         public bool IsDone(Station station) => _finished[(int)station];
+
+        public bool TryRestock()
+        {
+            if (!CanRestock)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < _stock.Length; index++)
+            {
+                _stock[index] += BundleAmount(index);
+            }
+
+            return true;
+        }
+
+        private static int BundleAmount(int index) => index == (int)Portion.Culture ? 1 : Recipe[index];
 
         [Serializable]
         public sealed class Snapshot
@@ -79,10 +111,8 @@ namespace Sporeborn.Gameplay.Growing
 
             for (int index = 0; index < state.stock.Length; index++)
             {
-                int limit = index == (int)Portion.Culture ? 3 : Recipe[index] * 3;
-                if (state.stock[index] < 0 || state.stock[index] > limit ||
-                    (index < Recipe.Length && (state.mix[index] < 0 || state.mix[index] > Recipe[index] ||
-                    state.stock[index] + state.mix[index] > limit)))
+                if (state.stock[index] < 0 ||
+                    (index < Recipe.Length && (state.mix[index] < 0 || state.mix[index] > Recipe[index])))
                 {
                     return false;
                 }

@@ -131,6 +131,8 @@ namespace Sporeborn.Runtime
         }
 
         internal bool HarvestReady => _cycle.Stage == TrayStage.Harvest && !_cycle.Dock.HasValue;
+        internal bool CanRestock => _cycle.CanRestock;
+        internal bool TryRestock() => _cycle.TryRestock();
         internal bool HasUncutMushrooms => System.Array.Exists(_crop, mushroom => mushroom != null && mushroom.NeedsCut);
         internal bool HasMushroomsOnPlatform => System.Array.Exists(_crop,
             mushroom => mushroom != null && mushroom.transform.parent == _tray.transform);
@@ -173,13 +175,13 @@ namespace Sporeborn.Runtime
 
         private string PreparationStep(Carryable held)
         {
-            if (_cycle.Stock(Portion.Base) + _cycle.Count(Portion.Base) < 4 ||
-                _cycle.Stock(Portion.Straw) + _cycle.Count(Portion.Straw) < 1 ||
-                _cycle.Stock(Portion.Premix) + _cycle.Count(Portion.Premix) < 1 ||
-                _cycle.Stock(Portion.Water) + _cycle.Count(Portion.Water) < 2 ||
+            if (_cycle.Stock(Portion.Base) < 4 - _cycle.Count(Portion.Base) ||
+                _cycle.Stock(Portion.Straw) < 1 - _cycle.Count(Portion.Straw) ||
+                _cycle.Stock(Portion.Premix) < 1 - _cycle.Count(Portion.Premix) ||
+                _cycle.Stock(Portion.Water) < 2 - _cycle.Count(Portion.Water) ||
                 _cycle.Stock(Portion.Culture) == 0)
             {
-                return "Запасов для новой партии больше нет.";
+                return "Запасов для новой партии не хватает. Комплект материалов можно купить на стенде.";
             }
 
             if (_cycle.LidClosed)

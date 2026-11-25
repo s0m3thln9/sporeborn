@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Sporeborn.Runtime
@@ -6,11 +7,18 @@ namespace Sporeborn.Runtime
     {
         private static readonly Quaternion TowardRoom = Quaternion.Euler(0f, 90f, 0f);
         private static readonly int ColorProperty = Shader.PropertyToID("_Color");
+        private const int MaterialsPrice = 50;
+        private const int BoxPrice = 10;
+        private const int FirstPurchasedBox = 4;
 
         [SerializeField] private Carryable _mushroomTemplate;
         [SerializeField] private ShippingBox _boxTemplate;
 
-        private readonly ShippingBox[] _boxes = new ShippingBox[3];
+        private readonly Dictionary<string, ShippingBox> _boxes = new Dictionary<string, ShippingBox>();
+        private int _nextBox = FirstPurchasedBox;
+        private Collider _materialsOffer;
+        private Collider _boxOffer;
+        private Vector3 _boxOutput;
         private BoxCollider _roomBounds;
         private Material _material;
         private Carryable _printedLabel;
@@ -48,6 +56,7 @@ namespace Sporeborn.Runtime
             Growth = new WorkshopGrowth(transform, _mushroomTemplate, _material, _roomBounds, harvestPosition, Sounds);
             BuildKnife(harvestPosition);
             BuildPackingStation();
+            BuildSupplyStand();
             Session = gameObject.AddComponent<WorkshopSession>();
             Session.Initialize(this);
         }
@@ -82,14 +91,10 @@ namespace Sporeborn.Runtime
         private void BuildPackingStation()
         {
             Vector3 boxPosition = _boxTemplate.transform.position;
-            _boxes[0] = _boxTemplate;
-            _boxes[1] = Instantiate(_boxTemplate, boxPosition + Vector3.left * 0.51f, Quaternion.identity);
-            _boxes[2] = Instantiate(_boxTemplate, boxPosition + Vector3.forward * 0.42f, Quaternion.identity);
-            for (int index = 0; index < _boxes.Length; index++)
-            {
-                _boxes[index].name = $"Shipping box {index + 1}";
-                _boxes[index].Configure(_roomBounds, $"box/{index + 1}");
-            }
+            _boxTemplate.gameObject.SetActive(false);
+            SpawnBox("box/1", boxPosition, _boxTemplate.transform.rotation);
+            SpawnBox("box/2", boxPosition + Vector3.left * 0.51f, Quaternion.identity);
+            SpawnBox("box/3", boxPosition + Vector3.forward * 0.42f, Quaternion.identity);
 
             GameObject printer = CreateBlock("Label printer", transform, new Vector3(0.12f, 0.96f, 1.0f),
                 new Vector3(0.24f, 0.12f, 0.21f), _material, new Color(0.25f, 0.33f, 0.40f));
@@ -103,6 +108,117 @@ namespace Sporeborn.Runtime
             AddSign(transform, dispatch.transform.position + TowardRoom * new Vector3(0f, 0.31f, -0.277f),
                 TowardRoom, "ОТПРАВКА", 0.025f, Color.white, new Vector2(0.47f, 0.060f));
             BuildScale();
+        }
+
+        private ShippingBox SpawnBox(string id, Vector3 position, Quaternion rotation)
+        {
+            ShippingBox box = Instantiate(_boxTemplate, position, rotation);
+            box.name = $"Shipping box {id.Substring(4)}";
+            box.Configure(_roomBounds, id);
+            _boxes.Add(id, box);
+            box.gameObject.SetActive(true);
+            return box;
+        }
+
+        private void BuildSupplyStand()
+        {
+            var position = new Vector3(2.61f, 0.42f, -2.33f);
+            var standSize = new Vector3(0.64f, 0.84f, 1.48f);
+            CreateBlock("Supply stand", transform, position, standSize, _material, new Color(0.22f, 0.30f, 0.37f));
+            AddSign(transform, new Vector3(2.286f, 0.73f, position.z), TowardRoom, "СНАБЖЕНИЕ", 0.036f,
+                Color.white, new Vector2(1.24f, 0.08f));
+            _materialsOffer = BuildOffer("Materials offer", "МАТЕРИАЛЫ · 50", -1.79f);
+            _boxOffer = BuildOffer("Box offer", "КОРОБКА · 10", -2.14f);
+
+            var output = new Vector3(position.x, 0.866f, -2.74f);
+            var outputSize = new Vector3(0.55f, 0.052f, 0.47f);
+            CreateBlock("Supply pickup", transform, output, outputSize, _material, new Color(0.34f, 0.55f, 0.48f));
+            _boxOutput = output + Vector3.up * (outputSize.y * 0.5f);
+            AddSign(transform, output + new Vector3(-0.278f, 0f, 0f), TowardRoom, "ВЫДАЧА", 0.021f,
+                Color.white, new Vector2(0.40f, 0.041f));
+        }
+
+        private Collider BuildOffer(string name, string caption, float z)
+        {
+            var position = new Vector3(2.58f, 0.94f, z);
+            GameObject offer = CreateBlock(name, transform, position, new Vector3(0.32f, 0.20f, 0.31f),
+                _material, new Color(0.28f, 0.46f, 0.58f));
+            AddSign(transform, position + Vector3.left * 0.162f, TowardRoom, caption, 0.021f, Color.white,
+                new Vector2(0.28f, 0.13f));
+            return offer.GetComponent<Collider>();
+        }
+
+        internal bool AimAtOffer(Collider target, bool buy, out string prompt, out string detail, out string notice)
+        {
+            prompt = detail = notice = null;
+            if (target == null || target != _materialsOffer && target != _boxOffer)
+            {
+                return false;
+            }
+
+            bool materials = target == _materialsOffer;
+            int price = materials ? MaterialsPrice : BoxPrice;
+            string product = materials ? "Комплект материалов" : "Пустая коробка";
+            string result = materials ? "В запасы: +4 основы, +1 соломы, +1 премикса, +2 воды, +1 культуры."
+                : "Открытая коробка на 20 грибов появится на выдаче.";
+            detail = $"{product} · Цена: {price} · Баланс: {Money}\n{result}";
+            if (buy && !materials)
+            {
+                Physics.SyncTransforms();
+            }
+
+            string refusal = PurchaseRefusal(materials, price);
+            prompt = refusal ?? $"ЛКМ   Купить за {price}";
+            if (!buy)
+            {
+                return true;
+            }
+
+            if (refusal != null)
+            {
+                notice = refusal;
+                return true;
+            }
+
+            if (materials)
+            {
+                if (!Growth.TryRestock())
+                {
+                    notice = "В запасах нет места для комплекта";
+                    return true;
+                }
+            }
+            else
+            {
+                SpawnBox($"box/{_nextBox}", _boxOutput, Quaternion.identity);
+                _nextBox++;
+            }
+
+            Money -= price;
+            Sounds.Play(WorkshopSounds.Cue.Pack);
+            notice = materials ? "Комплект добавлен к запасам" : "Коробка на выдаче";
+            return true;
+        }
+
+        private string PurchaseRefusal(bool materials, int price)
+        {
+            if (Money < price)
+            {
+                return $"Не хватает {price - Money}";
+            }
+
+            if (materials)
+            {
+                return Growth.CanRestock ? null : "В запасах нет места для комплекта";
+            }
+
+            if (_nextBox == int.MaxValue)
+            {
+                return "Невозможно выдать ещё одну коробку";
+            }
+
+            return Physics.CheckBox(_boxOutput + Vector3.up * 0.085f, new Vector3(0.25f, 0.083f, 0.21f),
+                Quaternion.identity, 1, QueryTriggerInteraction.Ignore) ? "Место выдачи занято" : null;
         }
 
         private void BuildScale()
@@ -149,7 +265,7 @@ namespace Sporeborn.Runtime
         private ShippingBox BoxOnScale()
         {
             Bounds platform = Scale.bounds;
-            foreach (ShippingBox box in _boxes)
+            foreach (ShippingBox box in _boxes.Values)
             {
                 if (box == null || !box.isActiveAndEnabled || !box.Item.IsResting)
                 {
@@ -199,10 +315,11 @@ namespace Sporeborn.Runtime
 
             if (Growth.HasMushroomsOnPlatform || held != null && held.Kind == Carryable.ItemKind.Mushroom)
             {
-                return "Переложите грибы с площадки в открытую коробку.";
+                return _boxes.Count == 0 ? "Купите пустую коробку на стенде «Снабжение»."
+                    : "Переложите грибы с площадки в открытую коробку.";
             }
 
-            foreach (ShippingBox box in _boxes)
+            foreach (ShippingBox box in _boxes.Values)
             {
                 if (box == null || !box.isActiveAndEnabled || box.Price == 0)
                 {
@@ -234,7 +351,7 @@ namespace Sporeborn.Runtime
         {
             ShippingBox closest = null;
             float nearest = MushroomInteraction.RangeMeters;
-            foreach (ShippingBox box in _boxes)
+            foreach (ShippingBox box in _boxes.Values)
             {
                 if (box != null && box.isActiveAndEnabled &&
                     box.CanReceive(aim, nearest, obstruction, out float distance))
@@ -271,9 +388,27 @@ namespace Sporeborn.Runtime
 
         public bool TryDispatchBox(ShippingBox box, out string notice)
         {
+            if (!_boxes.TryGetValue(box.Item.Id, out ShippingBox liveBox) || liveBox != box)
+            {
+                notice = "Коробка уже отправлена";
+                return false;
+            }
+
             string refusal = box.ShippingRefusal;
+            if (refusal == null && Money > int.MaxValue - box.Price)
+            {
+                notice = "Баланс достиг предела";
+                return false;
+            }
+
             if (box.TryShip(out int payment))
             {
+                _boxes.Remove(box.Item.Id);
+                if (_printedLabel != null && !_printedLabel.gameObject.activeInHierarchy)
+                {
+                    _printedLabel = null;
+                }
+
                 Money += payment;
                 Sounds.Play(WorkshopSounds.Cue.Sale);
                 notice = $"Продано за {payment}";

@@ -220,6 +220,19 @@ namespace Sporeborn.Runtime
         private void UpdateEmptyHand(Collider collider, Carryable target, ShippingBox box, bool interact, bool use)
         {
             SetAimed(target != null && target.CanPickUp ? target : null);
+            if (_batch.AimAtOffer(collider, use, out string prompt, out string detail, out string notice))
+            {
+                _prompt = prompt;
+                _detail = detail;
+                if (notice != null)
+                {
+                    _notice = notice;
+                    _noticeUntil = Time.time + 2.5f;
+                }
+
+                return;
+            }
+
             if (collider == _batch.Printer)
             {
                 _prompt = _batch.PrinterPrompt;

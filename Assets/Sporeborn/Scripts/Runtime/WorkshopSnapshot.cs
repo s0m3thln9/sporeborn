@@ -22,11 +22,12 @@ namespace Sporeborn.Runtime
                 version = WorkshopSave.CurrentVersion,
                 money = Money,
                 nextLabel = _nextLabel,
+                nextBox = _nextBox,
                 printerLabel = _printedLabel != null ? _printedLabel.Id : null,
                 items = SceneItems().Values.Select(item => item.Capture(item.Kind == Carryable.ItemKind.Tray
                     ? Growth.DockId : item.transform.parent != null
                         ? item.transform.parent.GetComponent<Carryable>()?.Id : null)).ToArray(),
-                boxes = _boxes.Where(box => box != null && box.gameObject.activeSelf).Select(box => box.Capture()).ToArray()
+                boxes = _boxes.Values.Select(box => box.Capture()).ToArray()
             };
             Growth.Capture(save);
             player.CapturePose(save);
@@ -37,14 +38,22 @@ namespace Sporeborn.Runtime
         {
             Dictionary<string, ItemSave> records = Validate(save);
             Dictionary<string, Carryable> items = SceneItems();
+            ILookup<string, ItemSave> children = records.Values.ToLookup(item => item.parent, StringComparer.Ordinal);
             Growth.Restore(save);
-            foreach (ShippingBox box in _boxes)
+            foreach (string id in _boxes.Keys.Where(id => !records.ContainsKey(id)).ToArray())
             {
-                if (!records.ContainsKey(box.Item.Id))
+                ShippingBox box = _boxes[id];
+                items.Remove(id);
+                _boxes.Remove(id);
+                box.gameObject.SetActive(false);
+                Destroy(box.gameObject);
+            }
+
+            foreach (BoxSave box in save.boxes)
+            {
+                if (!_boxes.ContainsKey(box.id))
                 {
-                    items.Remove(box.Item.Id);
-                    box.gameObject.SetActive(false);
-                    Destroy(box.gameObject);
+                    items.Add(box.id, SpawnBox(box.id, _boxOutput, Quaternion.identity).Item);
                 }
             }
 
@@ -77,12 +86,13 @@ namespace Sporeborn.Runtime
 
             foreach (BoxSave box in save.boxes)
             {
-                ItemSave[] children = records.Values.Where(item => item.parent == box.id).ToArray();
-                ItemSave label = children.SingleOrDefault(item => TryLabelId(item.id, out _));
-                items[box.id].GetComponent<ShippingBox>().RestoreContents(box,
-                    children.Count(item => TryMushroomId(item.id, out _, out _)), label != null ? items[label.id] : null);
+                IEnumerable<ItemSave> contents = children[box.id];
+                ItemSave label = contents.SingleOrDefault(item => TryLabelId(item.id, out _));
+                _boxes[box.id].RestoreContents(box,
+                    contents.Count(item => TryMushroomId(item.id, out _, out _)), label != null ? items[label.id] : null);
             }
 
+            _nextBox = NextBoxId(save);
             _nextLabel = save.nextLabel;
             _printedLabel = string.IsNullOrEmpty(save.printerLabel) ? null : items[save.printerLabel];
             Money = save.money;
@@ -105,9 +115,9 @@ namespace Sporeborn.Runtime
 
         private static Dictionary<string, ItemSave> Validate(WorkshopSave save)
         {
-            if (save == null || save.version != WorkshopSave.CurrentVersion || save.items == null || save.boxes == null ||
-                save.boxes.Length > 3 || save.money < 0 || save.money > 360 || save.money % 10 != 0 ||
-                save.nextLabel < 1 || save.cropNumber < 1 || save.cropNumber > 4 ||
+            if (save == null || !WorkshopSaveFile.IsSupportedVersion(save.version) || save.items == null || save.boxes == null ||
+                save.money < 0 || save.money % 10 != 0 || NextBoxId(save) < FirstPurchasedBox ||
+                save.nextLabel < 1 || save.cropNumber < 1 ||
                 save.scoop < -1 || save.scoop > 2 || !Finite(save.playerPosition) ||
                 !float.IsFinite(save.yaw) || !float.IsFinite(save.pitch) || Mathf.Abs(save.pitch) > 85f ||
                 !new GrowthCycle().TryRestore(save.growth))
@@ -117,9 +127,11 @@ namespace Sporeborn.Runtime
 
             var items = new Dictionary<string, ItemSave>(StringComparer.Ordinal);
             var boxes = new Dictionary<string, BoxSave>(StringComparer.Ordinal);
+            int nextBox = NextBoxId(save);
             foreach (BoxSave box in save.boxes)
             {
-                if (box == null || !IsBoxId(box.id) || box.flaps < 0 || box.flaps > ShippingBoxContents.FlapCount ||
+                if (box == null || !TryBoxId(box.id, out int sequence) || sequence >= nextBox ||
+                    box.flaps < 0 || box.flaps > ShippingBoxContents.FlapCount ||
                     !boxes.TryAdd(box.id, box))
                 {
                     throw InvalidSave();
@@ -201,11 +213,12 @@ namespace Sporeborn.Runtime
                 throw InvalidSave();
             }
 
+            ILookup<string, ItemSave> children = items.Values.ToLookup(item => item.parent, StringComparer.Ordinal);
             foreach (BoxSave box in boxes.Values)
             {
-                var contents = items.Values.Where(item => item.parent == box.id).ToArray();
+                IEnumerable<ItemSave> contents = children[box.id];
                 int labels = contents.Count(item => TryLabelId(item.id, out _));
-                if (contents.Length - labels > ShippingBoxContents.Columns * ShippingBoxContents.Rows ||
+                if (contents.Count() - labels > ShippingBoxContents.Columns * ShippingBoxContents.Rows ||
                     labels > 1 || (labels > 0 && box.flaps != ShippingBoxContents.FlapCount))
                 {
                     throw InvalidSave();
@@ -216,7 +229,15 @@ namespace Sporeborn.Runtime
         }
 
         private static bool HasParent(ItemSave item) => !string.IsNullOrEmpty(item.parent);
-        private static bool IsBoxId(string id) => id == "box/1" || id == "box/2" || id == "box/3";
+        private static int NextBoxId(WorkshopSave save) =>
+            save.version == WorkshopSave.LegacyVersion ? FirstPurchasedBox : save.nextBox;
+
+        private static bool TryBoxId(string id, out int sequence)
+        {
+            sequence = 0;
+            return id != null && id.StartsWith("box/", StringComparison.Ordinal) &&
+                int.TryParse(id.AsSpan(4), out sequence) && sequence > 0 && id == $"box/{sequence}";
+        }
 
         private static bool TryLabelId(string id, out int sequence)
         {
@@ -228,9 +249,15 @@ namespace Sporeborn.Runtime
         private static bool TryMushroomId(string id, out int crop, out int slot)
         {
             crop = slot = 0;
-            return id.StartsWith("mushroom/", StringComparison.Ordinal) && id.Length > 11 &&
-                int.TryParse(id.Substring(9, 1), out crop) && int.TryParse(id.Substring(11), out slot) &&
-                crop >= 1 && crop <= 3 && slot >= 1 && slot <= 12 && id == $"mushroom/{crop}/{slot}";
+            if (!id.StartsWith("mushroom/", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            int separator = id.IndexOf('/', 9);
+            return separator > 9 && int.TryParse(id.AsSpan(9, separator - 9), out crop) &&
+                int.TryParse(id.AsSpan(separator + 1), out slot) && crop >= 1 && slot >= 1 && slot <= 12 &&
+                id == $"mushroom/{crop}/{slot}";
         }
 
         private static bool Finite(Vector3 vector) =>

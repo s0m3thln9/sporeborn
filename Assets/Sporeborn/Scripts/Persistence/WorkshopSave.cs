@@ -8,10 +8,12 @@ namespace Sporeborn.Persistence
     [Serializable]
     public sealed class WorkshopSave
     {
-        public const int CurrentVersion = 1;
+        public const int CurrentVersion = 2;
+        public const int LegacyVersion = 1;
         public int version;
         public int money;
         public int nextLabel;
+        public int nextBox;
         public string printerLabel;
         public GrowthCycle.Snapshot growth;
         public int scoop;
@@ -52,13 +54,16 @@ namespace Sporeborn.Persistence
         public static WorkshopSave Read(string path)
         {
             WorkshopSave save = JsonUtility.FromJson<WorkshopSave>(File.ReadAllText(path));
-            if (save == null || save.version != WorkshopSave.CurrentVersion)
+            if (save == null || !IsSupportedVersion(save.version))
             {
                 throw new InvalidDataException("Версия сохранения не поддерживается.");
             }
 
             return save;
         }
+
+        public static bool IsSupportedVersion(int version) =>
+            version == WorkshopSave.LegacyVersion || version == WorkshopSave.CurrentVersion;
 
         public static void Write(string path, WorkshopSave save)
         {
